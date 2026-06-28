@@ -1,0 +1,46 @@
+const ENV = {
+  SUPABASE_URL: process.env.SUPABASE_URL?.trim(),
+  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY?.trim(),
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN?.trim(),
+  TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET?.trim(),
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY?.trim(),
+  OPENROUTER_INSIGHT_MODEL:
+    process.env.OPENROUTER_INSIGHT_MODEL?.trim() ||
+    "meta-llama/llama-3.1-8b-instruct:free",
+  CRON_SECRET: process.env.CRON_SECRET?.trim(),
+  DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE?.trim() || "Asia/Kolkata",
+  DEFAULT_CURRENCY: process.env.DEFAULT_CURRENCY?.trim() || "INR",
+  APP_BASE_URL: process.env.APP_BASE_URL?.trim(),
+} as const;
+
+function assertEnvValue(value: string | undefined, key: keyof typeof ENV): string {
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return value;
+}
+
+export const config = {
+  appBaseUrl: ENV.APP_BASE_URL,
+  defaultTimezone: ENV.DEFAULT_TIMEZONE,
+  defaultCurrency: ENV.DEFAULT_CURRENCY,
+  openRouterInsightModel: ENV.OPENROUTER_INSIGHT_MODEL,
+  telegramWebhookSecret: ENV.TELEGRAM_WEBHOOK_SECRET,
+  cronSecret: ENV.CRON_SECRET,
+  getTelegramToken() {
+    return assertEnvValue(ENV.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
+  },
+  getSupabaseUrl() {
+    return assertEnvValue(ENV.SUPABASE_URL, "SUPABASE_URL");
+  },
+  getSupabaseAnonKey() {
+    return assertEnvValue(ENV.SUPABASE_ANON_KEY, "SUPABASE_ANON_KEY");
+  },
+  getSupabaseServiceRoleKey() {
+    return assertEnvValue(ENV.SUPABASE_SERVICE_ROLE_KEY, "SUPABASE_SERVICE_ROLE_KEY");
+  },
+  getOpenRouterKey() {
+    return assertEnvValue(ENV.OPENROUTER_API_KEY, "OPENROUTER_API_KEY");
+  },
+} as const;
