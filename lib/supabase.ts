@@ -1,7 +1,19 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { config } from "@/lib/config";
-import { Expense, IngestionEvent, InsightPeriod, InsightRecord, NewExpense, NewInsightRecord, Profile } from "@/lib/types";
+import {
+  AuthLinkRequest,
+  CategorySource,
+  CategorizationJob,
+  CategorizationJobStatus,
+  Expense,
+  IngestionEvent,
+  InsightPeriod,
+  InsightRecord,
+  NewExpense,
+  NewInsightRecord,
+  Profile,
+} from "@/lib/types";
 
 type RestMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -49,7 +61,12 @@ async function supabaseRequest<TResponse, TBody = unknown>({
     return null as TResponse;
   }
 
-  return (await response.json()) as TResponse;
+  const text = await response.text();
+  if (!text) {
+    return null as TResponse;
+  }
+
+  return JSON.parse(text) as TResponse;
 }
 
 export function deriveUserIdFromTelegramId(telegramId: number): string {
@@ -83,6 +100,33 @@ export async function getProfileByUserId(userId: string): Promise<Profile | null
     },
   });
   return rows[0] || null;
+}
+
+export async function getProfileByAuthUserId(authUserId: string): Promise<Profile | null> {
+  const rows = await supabaseRequest<Profile[]>({
+    path: "profiles",
+    query: {
+      auth_user_id: `eq.${authUserId}`,
+      limit: "1",
+      select: "*",
+    },
+  });
+  return rows[0] || null;
+}
+
+export async function listProfilesByEmail(email: string): Promise<Profile[]> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) {
+    return [];
+  }
+  return supabaseRequest<Profile[]>({
+    path: "profiles",
+    query: {
+      email: `eq.${normalized}`,
+      select: "*",
+      order: "created_at.asc",
+    },
+  });
 }
 
 export async function listProfiles(limit = 200): Promise<Profile[]> {
@@ -124,9 +168,36 @@ export async function upsertTelegramProfile(params: {
   return rows[0];
 }
 
+export async function updateProfileEmailByUserId(params: {
+  userId: string;
+  email: string;
+}): Promise<Profile> {
+  const normalized = params.email.trim().toLowerCase();
+  const rows = await supabaseRequest<Profile[], Record<string, unknown>>({
+    path: "profiles",
+    method: "PATCH",
+    query: {
+      user_id: `eq.${params.userId}`,
+      select: "*",
+      limit: "1",
+    },
+    prefer: "return=representation",
+    body: {
+      email: normalized,
+      email_collected_at: new Date().toISOString(),
+    },
+  });
+
+  if (!rows[0]) {
+    throw new Error("Failed to update profile email");
+  }
+
+  return rows[0];
+}
+
 export async function listExpensesByUser(
   userId: string,
-  options: { from?: string; to?: string; limit?: number } = {},
+  options: { from?: string; to?: string; limit?: number; categorySources?: CategorySource[] } = {},
 ): Promise<Expense[]> {
   const query: Record<string, string> = {
     user_id: `eq.${userId}`,
@@ -143,6 +214,10 @@ export async function listExpensesByUser(
     query.expense_date = `lte.${options.to}`;
   }
 
+  if (options.categorySources?.length) {
+    query.category_source = `in.(${options.categorySources.join(",")})`;
+  }
+
   const rows = await supabaseRequest<Expense[]>({
     path: "expenses",
     query,
@@ -153,6 +228,27 @@ export async function listExpensesByUser(
     amount: Number(row.amount),
     confidence: Number(row.confidence),
   }));
+}
+
+export async function getExpenseById(expenseId: string): Promise<Expense | null> {
+  const rows = await supabaseRequest<Expense[]>({
+    path: "expenses",
+    query: {
+      id: `eq.${expenseId}`,
+      limit: "1",
+      select: "*",
+    },
+  });
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return {
+    ...rows[0],
+    amount: Number(rows[0].amount),
+    confidence: Number(rows[0].confidence),
+  };
 }
 
 export async function insertExpenses(rows: NewExpense[]): Promise<Expense[]> {
@@ -178,7 +274,9 @@ export async function insertExpenses(rows: NewExpense[]): Promise<Expense[]> {
 export async function patchExpenseById(params: {
   expenseId: string;
   userId: string;
-  fields: Partial<Pick<Expense, "category" | "merchant" | "note" | "expense_date">>;
+  fields: Partial<
+    Pick<Expense, "category" | "merchant" | "note" | "expense_date" | "category_source" | "category_reason">
+  >;
 }): Promise<Expense | null> {
   const updated = await supabaseRequest<Expense[], typeof params.fields>({
     path: "expenses",
@@ -186,6 +284,35 @@ export async function patchExpenseById(params: {
     query: {
       id: `eq.${params.expenseId}`,
       user_id: `eq.${params.userId}`,
+      select: "*",
+      limit: "1",
+    },
+    prefer: "return=representation",
+    body: params.fields,
+  });
+
+  if (!updated[0]) {
+    return null;
+  }
+
+  return {
+    ...updated[0],
+    amount: Number(updated[0].amount),
+    confidence: Number(updated[0].confidence),
+  };
+}
+
+export async function patchExpenseByIdAny(params: {
+  expenseId: string;
+  fields: Partial<
+    Pick<Expense, "category" | "merchant" | "note" | "expense_date" | "category_source" | "category_reason" | "confidence">
+  >;
+}): Promise<Expense | null> {
+  const updated = await supabaseRequest<Expense[], typeof params.fields>({
+    path: "expenses",
+    method: "PATCH",
+    query: {
+      id: `eq.${params.expenseId}`,
       select: "*",
       limit: "1",
     },
@@ -325,6 +452,209 @@ export async function updateIngestionEvent(params: {
       status: params.status,
       parsed_payload: params.parsedPayload || null,
       error: params.error || null,
+      updated_at: new Date().toISOString(),
+    },
+  });
+}
+
+function generateLinkCode(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+export async function createAuthLinkRequest(params: {
+  userId: string;
+  email: string;
+  ttlMinutes?: number;
+}): Promise<AuthLinkRequest> {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + (params.ttlMinutes || 15) * 60 * 1000).toISOString();
+
+  const code = generateLinkCode();
+  const rows = await supabaseRequest<AuthLinkRequest[], Array<Partial<AuthLinkRequest>>>({
+    path: "auth_link_requests",
+    method: "POST",
+    query: { select: "*" },
+    prefer: "return=representation",
+    body: [
+      {
+        user_id: params.userId,
+        email: params.email.trim().toLowerCase(),
+        code,
+        expires_at: expiresAt,
+      },
+    ],
+  });
+
+  if (!rows[0]) {
+    throw new Error("Failed to create auth link request");
+  }
+
+  return rows[0];
+}
+
+export async function getAuthLinkRequestByCode(code: string): Promise<AuthLinkRequest | null> {
+  const rows = await supabaseRequest<AuthLinkRequest[]>({
+    path: "auth_link_requests",
+    query: {
+      code: `eq.${code}`,
+      limit: "1",
+      select: "*",
+    },
+  });
+  return rows[0] || null;
+}
+
+export async function consumeAuthLinkRequest(params: {
+  code: string;
+  authUserId: string;
+  authEmail: string;
+}): Promise<Profile> {
+  const request = await getAuthLinkRequestByCode(params.code);
+  if (!request) {
+    throw new Error("Invalid link code");
+  }
+
+  if (request.consumed_at) {
+    throw new Error("Link code already used");
+  }
+
+  if (new Date(request.expires_at).getTime() < Date.now()) {
+    throw new Error("Link code expired");
+  }
+
+  const normalizedAuthEmail = params.authEmail.trim().toLowerCase();
+  if (normalizedAuthEmail !== request.email.trim().toLowerCase()) {
+    throw new Error("Logged in email does not match Telegram email");
+  }
+
+  const linkedRows = await supabaseRequest<Profile[], Record<string, unknown>>({
+    path: "profiles",
+    method: "PATCH",
+    query: {
+      user_id: `eq.${request.user_id}`,
+      select: "*",
+      limit: "1",
+    },
+    prefer: "return=representation",
+    body: {
+      auth_user_id: params.authUserId,
+      email: normalizedAuthEmail,
+    },
+  });
+
+  if (!linkedRows[0]) {
+    throw new Error("Failed to link auth account");
+  }
+
+  await supabaseRequest<null, Record<string, unknown>>({
+    path: "auth_link_requests",
+    method: "PATCH",
+    query: {
+      id: `eq.${request.id}`,
+    },
+    body: { consumed_at: new Date().toISOString() },
+  });
+
+  return linkedRows[0];
+}
+
+export async function linkProfileAuthUser(params: {
+  userId: string;
+  authUserId: string;
+  email?: string;
+}): Promise<Profile> {
+  const rows = await supabaseRequest<Profile[], Record<string, unknown>>({
+    path: "profiles",
+    method: "PATCH",
+    query: {
+      user_id: `eq.${params.userId}`,
+      select: "*",
+      limit: "1",
+    },
+    prefer: "return=representation",
+    body: {
+      auth_user_id: params.authUserId,
+      ...(params.email ? { email: params.email.trim().toLowerCase() } : {}),
+    },
+  });
+
+  if (!rows[0]) {
+    throw new Error("Failed to link profile");
+  }
+  return rows[0];
+}
+
+export async function createCategorizationJobs(expenses: Expense[]): Promise<void> {
+  if (!expenses.length) {
+    return;
+  }
+
+  await supabaseRequest<CategorizationJob[], Array<Partial<CategorizationJob>>>({
+    path: "expense_categorization_jobs",
+    method: "POST",
+    query: { select: "id", on_conflict: "expense_id" },
+    prefer: "resolution=merge-duplicates,return=representation",
+    body: expenses.map((expense) => ({
+      expense_id: expense.id,
+      user_id: expense.user_id,
+      status: "pending",
+      attempts: 0,
+      next_attempt_at: new Date().toISOString(),
+    })),
+  });
+}
+
+export async function listCategorizationJobs(limit = 50): Promise<CategorizationJob[]> {
+  return supabaseRequest<CategorizationJob[]>({
+    path: "expense_categorization_jobs",
+    query: {
+      status: "eq.pending",
+      order: "next_attempt_at.asc",
+      limit: String(limit),
+      select: "*",
+    },
+  });
+}
+
+export async function countCategorizationJobsByUser(
+  userId: string,
+  statuses: CategorizationJobStatus[],
+): Promise<number> {
+  if (!statuses.length) {
+    return 0;
+  }
+
+  const rows = await supabaseRequest<Array<{ id: string }>>({
+    path: "expense_categorization_jobs",
+    query: {
+      user_id: `eq.${userId}`,
+      status: `in.(${statuses.join(",")})`,
+      select: "id",
+      limit: "5000",
+    },
+  });
+
+  return rows.length;
+}
+
+export async function updateCategorizationJob(params: {
+  jobId: string;
+  status: CategorizationJobStatus;
+  attempts?: number;
+  nextAttemptAt?: string;
+  lastError?: string | null;
+}): Promise<void> {
+  await supabaseRequest<null, Record<string, unknown>>({
+    path: "expense_categorization_jobs",
+    method: "PATCH",
+    query: {
+      id: `eq.${params.jobId}`,
+    },
+    body: {
+      status: params.status,
+      attempts: params.attempts,
+      next_attempt_at: params.nextAttemptAt,
+      last_error: params.lastError ?? null,
       updated_at: new Date().toISOString(),
     },
   });

@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { computeExpenseStats } from "@/lib/analytics";
 import { config } from "@/lib/config";
 import { parseExpenseMessage } from "@/lib/expense-parser";
+import { getRequestId, logEvent } from "@/lib/logger";
+import { resolveProfileFromRequest } from "@/lib/request-user";
 import { insertExpenses, listExpensesByUser } from "@/lib/supabase";
 import { NewExpense } from "@/lib/types";
 
@@ -14,33 +16,45 @@ function badRequest(message: string): NextResponse {
 }
 
 export async function GET(request: Request) {
+  const requestId = getRequestId(request);
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get("userId");
-    if (!userId) {
-      return badRequest("Missing required query param: userId");
+    const profile = await resolveProfileFromRequest(request);
+    if (!profile) {
+      return NextResponse.json({ error: "Unauthorized", requestId }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
     const from = searchParams.get("from") || undefined;
     const to = searchParams.get("to") || undefined;
     const limitValue = searchParams.get("limit");
     const limit = limitValue ? Number.parseInt(limitValue, 10) : 200;
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 200;
 
-    const expenses = await listExpensesByUser(userId, {
+    const expenses = await listExpensesByUser(profile.user_id, {
       from,
       to,
-      limit: Number.isFinite(limit) ? limit : 200,
+      limit: safeLimit,
     });
 
     return NextResponse.json({
       expenses,
       stats: computeExpenseStats(expenses),
+      requestId,
     });
   } catch (error) {
+    logEvent({
+      requestId,
+      route: "/api/expenses",
+      phase: "fetch_failed",
+      severity: "error",
+      message: "Failed to fetch expenses",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json(
       {
         error: "Failed to fetch expenses",
         details: error instanceof Error ? error.message : "Unknown error",
+        requestId,
       },
       { status: 500 },
     );
@@ -48,9 +62,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const requestId = getRequestId(request);
   try {
+    const profile = await resolveProfileFromRequest(request);
+    if (!profile) {
+      return NextResponse.json({ error: "Unauthorized", requestId }, { status: 401 });
+    }
+
     const body = (await request.json()) as {
-      userId?: string;
       source?: "telegram" | "dashboard";
       text?: string;
       amount?: number;
@@ -61,12 +80,8 @@ export async function POST(request: Request) {
       currency?: string;
     };
 
-    if (!body.userId) {
-      return badRequest("Missing required field: userId");
-    }
-
     const source = body.source || "dashboard";
-    const currency = body.currency || config.defaultCurrency;
+    const currency = body.currency || profile.currency || config.defaultCurrency;
     const defaultExpenseDate = body.expenseDate || new Date().toISOString();
 
     let rows: NewExpense[] = [];
@@ -75,7 +90,7 @@ export async function POST(request: Request) {
     if (body.text?.trim()) {
       const parsed = parseExpenseMessage(body.text);
       rows = parsed.parsed.map((line) => ({
-        user_id: body.userId as string,
+        user_id: profile.user_id,
         amount: line.amount,
         currency,
         category: line.category,
@@ -83,13 +98,14 @@ export async function POST(request: Request) {
         note: line.note,
         expense_date: defaultExpenseDate,
         source,
+        category_source: "rule",
         confidence: 1,
       }));
       invalid = parsed.invalid;
     } else if (typeof body.amount === "number" && body.amount > 0) {
       rows = [
         {
-          user_id: body.userId,
+          user_id: profile.user_id,
           amount: Number(body.amount.toFixed(2)),
           currency,
           category: body.category || "Other",
@@ -97,6 +113,7 @@ export async function POST(request: Request) {
           note: body.note || body.merchant || "Manual expense",
           expense_date: defaultExpenseDate,
           source,
+          category_source: body.category ? "manual" : "rule",
           confidence: 1,
         },
       ];
@@ -113,14 +130,24 @@ export async function POST(request: Request) {
       {
         inserted,
         invalid,
+        requestId,
       },
       { status: 201 },
     );
   } catch (error) {
+    logEvent({
+      requestId,
+      route: "/api/expenses",
+      phase: "insert_failed",
+      severity: "error",
+      message: "Failed to insert expenses",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json(
       {
         error: "Failed to insert expenses",
         details: error instanceof Error ? error.message : "Unknown error",
+        requestId,
       },
       { status: 500 },
     );

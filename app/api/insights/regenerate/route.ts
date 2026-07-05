@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { generateAndStoreInsight } from "@/lib/insights";
+import { getRequestId, logEvent } from "@/lib/logger";
+import { resolveProfileFromRequest } from "@/lib/request-user";
 import { InsightPeriod } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,15 +13,24 @@ function isInsightPeriod(value: string): value is InsightPeriod {
 }
 
 export async function POST(request: Request) {
+  const requestId = getRequestId(request);
   try {
+    logEvent({
+      requestId,
+      route: "/api/insights/regenerate",
+      phase: "received",
+      severity: "info",
+      message: "Insight regenerate request received",
+    });
+
+    const profile = await resolveProfileFromRequest(request);
+    if (!profile) {
+      return NextResponse.json({ error: "Unauthorized", requestId }, { status: 401 });
+    }
+
     const payload = (await request.json()) as {
-      userId?: string;
       period?: string;
     };
-
-    if (!payload.userId) {
-      return NextResponse.json({ error: "Missing required field: userId" }, { status: 400 });
-    }
 
     const period = payload.period || "daily";
     if (!isInsightPeriod(period)) {
@@ -30,17 +41,39 @@ export async function POST(request: Request) {
     }
 
     const insight = await generateAndStoreInsight({
-      userId: payload.userId,
+      userId: profile.user_id,
       period,
       force: true,
+      requestId,
     });
 
-    return NextResponse.json({ insight });
+    const fallbackUsed = insight.model.startsWith("fallback");
+    const parseFailed = insight.model === "fallback-parser";
+
+    logEvent({
+      requestId,
+      route: "/api/insights/regenerate",
+      phase: "done",
+      severity: "info",
+      message: "Insight regenerate completed",
+      details: { period, fallbackUsed, parseFailed, model: insight.model },
+    });
+
+    return NextResponse.json({ insight, fallbackUsed, parseFailed, requestId });
   } catch (error) {
+    logEvent({
+      requestId,
+      route: "/api/insights/regenerate",
+      phase: "failed",
+      severity: "error",
+      message: "Failed to regenerate insight",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json(
       {
         error: "Failed to regenerate insight",
         details: error instanceof Error ? error.message : "Unknown error",
+        requestId,
       },
       { status: 500 },
     );

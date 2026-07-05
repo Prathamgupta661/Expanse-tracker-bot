@@ -1,11 +1,15 @@
 export type InsightPeriod = "daily" | "weekly" | "monthly";
 
 export type ExpenseSource = "telegram" | "dashboard";
+export type CategorySource = "rule" | "ai" | "manual";
+export type CategorizationJobStatus = "pending" | "processing" | "done" | "failed";
 
 export interface Profile {
   user_id: string;
   telegram_id: number | null;
   auth_user_id: string | null;
+  email: string | null;
+  email_collected_at: string | null;
   timezone: string;
   currency: string;
   created_at: string;
@@ -22,6 +26,8 @@ export interface Expense {
   note: string;
   expense_date: string;
   source: ExpenseSource;
+  category_source: CategorySource;
+  category_reason: string | null;
   confidence: number;
   created_at: string;
 }
@@ -35,6 +41,8 @@ export interface NewExpense {
   note: string;
   expense_date: string;
   source: ExpenseSource;
+  category_source?: CategorySource;
+  category_reason?: string;
   confidence?: number;
 }
 
@@ -100,4 +108,26 @@ export interface ExpenseStats {
   count: number;
   categoryTotals: Array<{ category: string; total: number }>;
   dailyTotals: Array<{ date: string; total: number }>;
+}
+
+export interface AuthLinkRequest {
+  id: string;
+  user_id: string;
+  email: string;
+  code: string;
+  expires_at: string;
+  consumed_at: string | null;
+  created_at: string;
+}
+
+export interface CategorizationJob {
+  id: string;
+  expense_id: string;
+  user_id: string;
+  status: CategorizationJobStatus;
+  attempts: number;
+  next_attempt_at: string;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
 }

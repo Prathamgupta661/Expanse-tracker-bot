@@ -1,6 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type InsightPeriod = "daily" | "weekly" | "monthly";
 
@@ -18,7 +22,6 @@ interface DashboardStats {
   totalAmount: number;
   count: number;
   categoryTotals: Array<{ category: string; total: number }>;
-  dailyTotals: Array<{ date: string; total: number }>;
 }
 
 interface InsightData {
@@ -26,6 +29,13 @@ interface InsightData {
   anomalies: string[];
   tips: string[];
   generated_at: string;
+}
+
+interface AuthState {
+  authenticated: boolean;
+  linked: boolean;
+  email: string | null;
+  profile: { user_id: string; telegram_id: number | null } | null;
 }
 
 function formatAmount(amount: number): string {
@@ -37,10 +47,15 @@ function formatAmount(amount: number): string {
 }
 
 export default function Home() {
-  const [userId, setUserId] = useState("");
+  const router = useRouter();
+
   const [period, setPeriod] = useState<InsightPeriod>("daily");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [insightNotice, setInsightNotice] = useState<string | null>(null);
+  const [authState, setAuthState] = useState<AuthState | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [insight, setInsight] = useState<InsightData | null>(null);
@@ -52,9 +67,115 @@ export default function Home() {
     return Math.max(...stats.categoryTotals.map((item) => item.total), 1);
   }, [stats]);
 
-  const loadDashboard = async (generateInsight = false) => {
-    if (!userId.trim()) {
-      setError("Enter a user id first.");
+  const fetchDashboardData = async (authToken: string, selectedPeriod: InsightPeriod) => {
+    const [expensesRes, insightRes] = await Promise.all([
+      fetch(`/api/expenses?limit=200`, {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }),
+      fetch(`/api/insights?period=${selectedPeriod}`, {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }),
+    ]);
+
+    const expensePayload = (await expensesRes.json()) as {
+      expenses?: ExpenseRow[];
+      stats?: DashboardStats;
+      error?: string;
+      details?: string;
+    };
+    const insightPayload = (await insightRes.json()) as {
+      insight?: InsightData | null;
+      error?: string;
+      details?: string;
+      cacheMiss?: boolean;
+      requestId?: string;
+    };
+
+    if (!expensesRes.ok) {
+      throw new Error(expensePayload.error || expensePayload.details || "Failed to load expenses");
+    }
+
+    setExpenses(expensePayload.expenses || []);
+    setStats(expensePayload.stats || null);
+
+    if (!insightRes.ok) {
+      setInsight(null);
+      setInsightNotice(
+        `Insight unavailable right now${insightPayload.requestId ? ` (request: ${insightPayload.requestId})` : ""}.`,
+      );
+      return;
+    }
+
+    setInsight(insightPayload.insight || null);
+    setInsightNotice(
+      insightPayload.cacheMiss
+        ? "No cached insight yet. Click Regenerate Insight."
+        : null,
+    );
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    const bootstrap = async () => {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data } = await supabase.auth.getSession();
+        const session = data.session;
+
+        if (!session?.access_token) {
+          router.replace("/login?next=%2F");
+          return;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setToken(session.access_token);
+
+        const meRes = await fetch("/api/auth/me", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        const mePayload = (await meRes.json()) as AuthState & { error?: string; details?: string };
+        if (!meRes.ok) {
+          throw new Error(mePayload.error || mePayload.details || "Failed to load user session");
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setAuthState(mePayload);
+        if (mePayload.linked) {
+          await fetchDashboardData(session.access_token, "daily");
+        }
+      } catch (caught) {
+        if (!active) {
+          return;
+        }
+        setError(caught instanceof Error ? caught.message : "Unknown error");
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
+  const loadDashboard = async () => {
+    if (!token) {
       return;
     }
 
@@ -62,37 +183,7 @@ export default function Home() {
     setError(null);
 
     try {
-      const [expensesRes, insightRes] = await Promise.all([
-        fetch(`/api/expenses?userId=${encodeURIComponent(userId.trim())}&limit=200`, {
-          cache: "no-store",
-        }),
-        fetch(
-          `/api/insights?userId=${encodeURIComponent(userId.trim())}&period=${period}&generate=${String(generateInsight)}`,
-          { cache: "no-store" },
-        ),
-      ]);
-
-      const expensePayload = (await expensesRes.json()) as {
-        expenses?: ExpenseRow[];
-        stats?: DashboardStats;
-        error?: string;
-      };
-      const insightPayload = (await insightRes.json()) as {
-        insight?: InsightData | null;
-        error?: string;
-      };
-
-      if (!expensesRes.ok) {
-        throw new Error(expensePayload.error || "Failed to load expenses");
-      }
-
-      if (!insightRes.ok) {
-        throw new Error(insightPayload.error || "Failed to load insights");
-      }
-
-      setExpenses(expensePayload.expenses || []);
-      setStats(expensePayload.stats || null);
-      setInsight(insightPayload.insight || null);
+      await fetchDashboardData(token, period);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unknown error");
     } finally {
@@ -101,8 +192,7 @@ export default function Home() {
   };
 
   const regenerateInsight = async () => {
-    if (!userId.trim()) {
-      setError("Enter a user id first.");
+    if (!token) {
       return;
     }
 
@@ -113,18 +203,19 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          userId: userId.trim(),
           period,
         }),
       });
 
-      const payload = (await res.json()) as { insight?: InsightData; error?: string };
+      const payload = (await res.json()) as { insight?: InsightData; error?: string; details?: string };
       if (!res.ok) {
-        throw new Error(payload.error || "Failed to regenerate insight");
+        throw new Error(payload.error || payload.details || "Failed to regenerate insight");
       }
       setInsight(payload.insight || null);
+      setInsightNotice(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unknown error");
     } finally {
@@ -132,23 +223,65 @@ export default function Home() {
     }
   };
 
+  const signOut = async () => {
+    const supabase = getSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    router.replace("/login?next=%2F");
+  };
+
+  if (!authState) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-50">
+        <main className="mx-auto flex min-h-screen max-w-md items-center px-5">
+          <section className="w-full rounded-2xl border border-slate-800 bg-slate-900/80 p-6">
+            <h1 className="text-xl font-semibold">Loading dashboard...</h1>
+            {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  if (!authState.linked) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-50">
+        <main className="mx-auto flex min-h-screen max-w-md items-center px-5">
+          <section className="w-full rounded-2xl border border-slate-800 bg-slate-900/80 p-6">
+            <h1 className="text-xl font-semibold">Account not linked yet</h1>
+            <p className="mt-3 text-sm text-slate-300">
+              Send `/email {authState.email || "you@example.com"}` to your Telegram bot, then open
+              the link you receive there.
+            </p>
+            <div className="mt-4 flex gap-3">
+              <Link
+                href="/"
+                className="inline-flex rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+              >
+                Refresh
+              </Link>
+              <button
+                onClick={() => void signOut()}
+                className="inline-flex rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400"
+              >
+                Sign Out
+              </button>
+            </div>
+            {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50">
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
           <p className="text-sm uppercase tracking-widest text-sky-300">Expense Bot Dashboard</p>
           <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">Expense Breakdown + AI Insight</h1>
-          <p className="mt-2 text-sm text-slate-300">
-            Insight calls are cached daily. Regular expense inserts do not hit the LLM.
-          </p>
+          <p className="mt-2 text-sm text-slate-300">Logged in as {authState.email || "unknown"}</p>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-[2fr_1fr_auto_auto]">
-            <input
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none ring-sky-400 focus:ring-2"
-              placeholder="User ID"
-              value={userId}
-              onChange={(event) => setUserId(event.target.value)}
-            />
+          <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
             <select
               className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
               value={period}
@@ -160,7 +293,7 @@ export default function Home() {
             </select>
             <button
               className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
-              onClick={() => void loadDashboard(false)}
+              onClick={() => void loadDashboard()}
               disabled={loading}
             >
               Load
@@ -172,6 +305,12 @@ export default function Home() {
             >
               Regenerate Insight
             </button>
+            <button
+              className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+              onClick={() => void signOut()}
+            >
+              Sign Out
+            </button>
           </div>
 
           {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}
@@ -181,7 +320,7 @@ export default function Home() {
           <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
             <p className="text-xs uppercase tracking-wider text-slate-400">Total Spend</p>
             <p className="mt-2 text-2xl font-semibold">
-              {stats ? formatAmount(stats.totalAmount) : "₹0.00"}
+              {stats ? formatAmount(stats.totalAmount) : "INR 0.00"}
             </p>
           </article>
           <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
@@ -191,9 +330,7 @@ export default function Home() {
           <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
             <p className="text-xs uppercase tracking-wider text-slate-400">Last Insight</p>
             <p className="mt-2 text-sm font-medium text-slate-200">
-              {insight?.generated_at
-                ? new Date(insight.generated_at).toLocaleString("en-IN")
-                : "Not generated"}
+              {insight?.generated_at ? new Date(insight.generated_at).toLocaleString("en-IN") : "Not generated"}
             </p>
           </article>
         </section>
@@ -256,7 +393,9 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-slate-400">Load data to view cached insight.</p>
+              <p className="mt-3 text-sm text-slate-400">
+                {insightNotice || "Load data to view cached insight."}
+              </p>
             )}
           </article>
         </section>
@@ -284,9 +423,7 @@ export default function Home() {
                       <td className="px-2 py-2">{expense.merchant}</td>
                       <td className="px-2 py-2">{expense.category}</td>
                       <td className="px-2 py-2 text-slate-400">{expense.note}</td>
-                      <td className="px-2 py-2 text-right font-medium">
-                        {formatAmount(expense.amount)}
-                      </td>
+                      <td className="px-2 py-2 text-right font-medium">{formatAmount(expense.amount)}</td>
                     </tr>
                   ))
                 ) : (
