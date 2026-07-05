@@ -3,6 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
@@ -22,6 +35,7 @@ interface DashboardStats {
   totalAmount: number;
   count: number;
   categoryTotals: Array<{ category: string; total: number }>;
+  dailyTotals: Array<{ date: string; total: number }>;
 }
 
 interface InsightData {
@@ -38,12 +52,22 @@ interface AuthState {
   profile: { user_id: string; telegram_id: number | null } | null;
 }
 
+const CHART_COLORS = ["#38bdf8", "#22d3ee", "#34d399", "#f59e0b", "#f43f5e", "#8b5cf6", "#94a3b8"];
+
 function formatAmount(amount: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(amount);
+}
+
+function formatChartAmount(value: unknown): string {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "N/A";
+  }
+  return formatAmount(numeric);
 }
 
 export default function Home() {
@@ -60,11 +84,40 @@ export default function Home() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [insight, setInsight] = useState<InsightData | null>(null);
 
-  const categoryMax = useMemo(() => {
-    if (!stats || !stats.categoryTotals.length) {
-      return 1;
+  const pieData = useMemo(() => {
+    if (!stats?.categoryTotals?.length) {
+      return [];
     }
-    return Math.max(...stats.categoryTotals.map((item) => item.total), 1);
+
+    const primary = stats.categoryTotals.slice(0, 6);
+    const otherTotal = stats.categoryTotals
+      .slice(6)
+      .reduce((sum, item) => sum + item.total, 0);
+
+    const items = primary.map((item) => ({
+      name: item.category,
+      value: item.total,
+    }));
+
+    if (otherTotal > 0) {
+      items.push({ name: "Other", value: Number(otherTotal.toFixed(2)) });
+    }
+
+    return items;
+  }, [stats]);
+
+  const trendData = useMemo(() => {
+    if (!stats?.dailyTotals?.length) {
+      return [];
+    }
+
+    return stats.dailyTotals.map((item) => ({
+      ...item,
+      label: new Date(item.date).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+      }),
+    }));
   }, [stats]);
 
   const fetchDashboardData = async (authToken: string, selectedPeriod: InsightPeriod) => {
@@ -338,24 +391,33 @@ export default function Home() {
         <section className="mt-6 grid gap-6 lg:grid-cols-2">
           <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
             <h2 className="text-lg font-semibold">Category Breakdown</h2>
-            <div className="mt-4 space-y-3">
-              {stats?.categoryTotals.length ? (
-                stats.categoryTotals.slice(0, 8).map((item) => (
-                  <div key={item.category}>
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span>{item.category}</span>
-                      <span>{formatAmount(item.total)}</span>
-                    </div>
-                    <div className="h-2 rounded bg-slate-800">
-                      <div
-                        className="h-2 rounded bg-sky-400"
-                        style={{
-                          width: `${Math.max((item.total / categoryMax) * 100, 4)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))
+            <div className="mt-4 h-72">
+              {pieData.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={58}
+                      outerRadius={96}
+                      paddingAngle={2}
+                    >
+                      {pieData.map((entry, index) => (
+                        <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: unknown) => formatChartAmount(value)}
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        border: "1px solid #334155",
+                        borderRadius: "0.75rem",
+                      }}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
               ) : (
                 <p className="text-sm text-slate-400">No category data yet.</p>
               )}
@@ -398,6 +460,39 @@ export default function Home() {
               </p>
             )}
           </article>
+        </section>
+
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <h2 className="text-lg font-semibold">Daily Spend Trend</h2>
+          <div className="mt-4 h-72">
+            {trendData.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                  <XAxis dataKey="label" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                  <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} width={72} />
+                  <Tooltip
+                    formatter={(value: unknown) => formatChartAmount(value)}
+                    contentStyle={{
+                      backgroundColor: "#0f172a",
+                      border: "1px solid #334155",
+                      borderRadius: "0.75rem",
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="total"
+                    stroke="#38bdf8"
+                    strokeWidth={3}
+                    dot={{ r: 3, fill: "#38bdf8" }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-slate-400">No daily trend data yet.</p>
+            )}
+          </div>
         </section>
 
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
