@@ -4,6 +4,7 @@ create table if not exists public.profiles (
   user_id uuid primary key,
   telegram_id bigint unique,
   auth_user_id uuid unique,
+  google_sub text unique,
   email text unique,
   email_collected_at timestamptz,
   timezone text not null default 'Asia/Kolkata',
@@ -11,6 +12,9 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.profiles
+  add column if not exists google_sub text;
 
 create table if not exists public.expenses (
   id uuid primary key default gen_random_uuid(),
@@ -92,6 +96,9 @@ create index if not exists idx_expenses_user_date on public.expenses (user_id, e
 create index if not exists idx_expenses_user_category on public.expenses (user_id, category);
 create index if not exists idx_insights_user_generated on public.ai_insights (user_id, generated_at desc);
 create index if not exists idx_profiles_email on public.profiles (email);
+create unique index if not exists idx_profiles_google_sub_unique
+  on public.profiles (google_sub)
+  where google_sub is not null;
 create index if not exists idx_auth_link_requests_code on public.auth_link_requests (code);
 create index if not exists idx_auth_link_requests_user on public.auth_link_requests (user_id, created_at desc);
 create index if not exists idx_categorization_jobs_status on public.expense_categorization_jobs (status, next_attempt_at asc);

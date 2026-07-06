@@ -1,73 +1,41 @@
-import { config } from "@/lib/config";
-import { getProfileByAuthUserId } from "@/lib/supabase";
+import { getSessionFromRequest } from "@/lib/auth-session";
+import { getProfileByAuthUserId, getProfileByGoogleSub } from "@/lib/supabase";
 import { Profile } from "@/lib/types";
 
-export async function resolveSupabaseAuthUserId(request: Request): Promise<string | null> {
-  const header = request.headers.get("authorization");
-  if (!header || !header.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
-
-  const token = header.slice(7).trim();
-  if (!token) {
-    return null;
-  }
-
-  const response = await fetch(`${config.getSupabaseUrl()}/auth/v1/user`, {
-    headers: {
-      apikey: config.getSupabaseAnonKey(),
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = (await response.json()) as { id?: string };
-  return payload.id || null;
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export async function resolveProfileFromRequest(request: Request): Promise<Profile | null> {
-  const authUserId = await resolveSupabaseAuthUserId(request);
-  if (!authUserId) {
+  const identity = await resolveAuthIdentityFromRequest(request);
+  if (!identity) {
     return null;
   }
 
-  return getProfileByAuthUserId(authUserId);
+  const profileByGoogleSub = await getProfileByGoogleSub(identity.googleSub);
+  if (profileByGoogleSub) {
+    return profileByGoogleSub;
+  }
+
+  // Legacy fallback for older records linked before direct Google auth migration.
+  if (!isUuid(identity.googleSub)) {
+    return null;
+  }
+
+  return getProfileByAuthUserId(identity.googleSub);
 }
 
 export async function resolveAuthIdentityFromRequest(
   request: Request,
-): Promise<{ authUserId: string; email: string | null } | null> {
-  const header = request.headers.get("authorization");
-  if (!header || !header.toLowerCase().startsWith("bearer ")) {
-    return null;
-  }
-
-  const token = header.slice(7).trim();
-  if (!token) {
-    return null;
-  }
-
-  const response = await fetch(`${config.getSupabaseUrl()}/auth/v1/user`, {
-    headers: {
-      apikey: config.getSupabaseAnonKey(),
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = (await response.json()) as { id?: string; email?: string | null };
-  if (!payload.id) {
+): Promise<{ googleSub: string; email: string | null; name: string | null } | null> {
+  const session = getSessionFromRequest(request);
+  if (!session) {
     return null;
   }
 
   return {
-    authUserId: payload.id,
-    email: payload.email || null,
+    googleSub: session.googleSub,
+    email: session.email || null,
+    name: session.name || null,
   };
 }

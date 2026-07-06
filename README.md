@@ -3,7 +3,7 @@
 This app includes:
 - Telegram webhook ingestion (`pizza 450`, `uber 220` style multi-line input)
 - Supabase-backed expense storage
-- Supabase Auth magic-link login for dashboard
+- Google OAuth login for dashboard (app-managed session cookie)
 - Dashboard breakdown UI (totals, categories, recent transactions)
 - AI insights via OpenRouter free model with DB caching
 - Async AI category refinement queue for new expenses
@@ -12,11 +12,16 @@ This app includes:
 ## Setup
 
 1. Copy `.env.example` to `.env.local` and fill values.
-   - Set both server and public Supabase vars:
-     - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-     - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - Set server Supabase vars:
+     - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+   - Set Google OAuth vars:
+     - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_AUTH_SECRET`
+     - Optional: `GOOGLE_REDIRECT_URI` (defaults to `{APP_BASE_URL}/api/auth/google/callback`)
+   - For ngrok development, set:
+     - `APP_BASE_URL` to your ngrok URL
 2. Run `supabase/schema.sql` in your Supabase SQL editor.
-3. Start app:
+3. Run new migrations from `supabase/migrations/*` if your DB already exists.
+4. Start app:
 
 ```bash
 npm run dev
@@ -44,15 +49,17 @@ Commands:
 
 ## Dashboard Auth
 
-- Open `/login` and request a magic link.
+- Open `/login` and continue with Google.
 - After login, dashboard auto-loads your own expenses (no manual user id input).
 - If account not linked yet, run `/email ...` in Telegram and open the link from bot.
 
 ## API Endpoints
 
 - `POST /api/telegram/webhook`
-- `POST /api/auth/magic-link`
+- `GET /api/auth/google/start`
+- `GET /api/auth/google/callback`
 - `GET /api/auth/me`
+- `POST /api/auth/logout`
 - `POST /api/auth/link`
 - `GET /api/expenses`
 - `POST /api/expenses`

@@ -19,12 +19,12 @@ export async function GET(request: Request) {
 
     if (!profile && identity.email) {
       const candidates = await listProfilesByEmail(identity.email);
-      const unlinked = candidates.filter((item) => !item.auth_user_id);
+      const unlinked = candidates.filter((item) => !item.google_sub);
 
       if (unlinked.length === 1) {
         profile = await linkProfileAuthUser({
           userId: unlinked[0].user_id,
-          authUserId: identity.authUserId,
+          googleSub: identity.googleSub,
           email: identity.email,
         });
       }
@@ -32,8 +32,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       authenticated: true,
-      authUserId: identity.authUserId,
+      googleSub: identity.googleSub,
       email: identity.email,
+      name: identity.name,
       profile,
       linked: Boolean(profile),
       requestId,

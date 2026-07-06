@@ -8,6 +8,7 @@ export interface Profile {
   user_id: string;
   telegram_id: number | null;
   auth_user_id: string | null;
+  google_sub: string | null;
   email: string | null;
   email_collected_at: string | null;
   timezone: string;

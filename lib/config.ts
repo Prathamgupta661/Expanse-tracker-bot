@@ -8,6 +8,10 @@ const ENV = {
   OPENROUTER_INSIGHT_MODEL:
     process.env.OPENROUTER_INSIGHT_MODEL?.trim() ||
     "meta-llama/llama-3.1-8b-instruct:free",
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID?.trim(),
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET?.trim(),
+  GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI?.trim(),
+  APP_AUTH_SECRET: process.env.APP_AUTH_SECRET?.trim(),
   CRON_SECRET: process.env.CRON_SECRET?.trim(),
   DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE?.trim() || "Asia/Kolkata",
   DEFAULT_CURRENCY: process.env.DEFAULT_CURRENCY?.trim() || "INR",
@@ -42,5 +46,17 @@ export const config = {
   },
   getOpenRouterKey() {
     return assertEnvValue(ENV.OPENROUTER_API_KEY, "OPENROUTER_API_KEY");
+  },
+  getGoogleClientId() {
+    return assertEnvValue(ENV.GOOGLE_CLIENT_ID, "GOOGLE_CLIENT_ID");
+  },
+  getGoogleClientSecret() {
+    return assertEnvValue(ENV.GOOGLE_CLIENT_SECRET, "GOOGLE_CLIENT_SECRET");
+  },
+  getGoogleRedirectUri(fallbackBaseUrl: string) {
+    return ENV.GOOGLE_REDIRECT_URI || `${fallbackBaseUrl}/api/auth/google/callback`;
+  },
+  getAppAuthSecret() {
+    return assertEnvValue(ENV.APP_AUTH_SECRET, "APP_AUTH_SECRET");
   },
 } as const;

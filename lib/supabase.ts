@@ -114,6 +114,18 @@ export async function getProfileByAuthUserId(authUserId: string): Promise<Profil
   return rows[0] || null;
 }
 
+export async function getProfileByGoogleSub(googleSub: string): Promise<Profile | null> {
+  const rows = await supabaseRequest<Profile[]>({
+    path: "profiles",
+    query: {
+      google_sub: `eq.${googleSub}`,
+      limit: "1",
+      select: "*",
+    },
+  });
+  return rows[0] || null;
+}
+
 export async function listProfilesByEmail(email: string): Promise<Profile[]> {
   const normalized = email.trim().toLowerCase();
   if (!normalized) {
@@ -506,8 +518,8 @@ export async function getAuthLinkRequestByCode(code: string): Promise<AuthLinkRe
 
 export async function consumeAuthLinkRequest(params: {
   code: string;
-  authUserId: string;
-  authEmail: string;
+  googleSub: string;
+  googleEmail: string;
 }): Promise<Profile> {
   const request = await getAuthLinkRequestByCode(params.code);
   if (!request) {
@@ -522,7 +534,7 @@ export async function consumeAuthLinkRequest(params: {
     throw new Error("Link code expired");
   }
 
-  const normalizedAuthEmail = params.authEmail.trim().toLowerCase();
+  const normalizedAuthEmail = params.googleEmail.trim().toLowerCase();
   if (normalizedAuthEmail !== request.email.trim().toLowerCase()) {
     throw new Error("Logged in email does not match Telegram email");
   }
@@ -537,7 +549,7 @@ export async function consumeAuthLinkRequest(params: {
     },
     prefer: "return=representation",
     body: {
-      auth_user_id: params.authUserId,
+      google_sub: params.googleSub,
       email: normalizedAuthEmail,
     },
   });
@@ -560,7 +572,7 @@ export async function consumeAuthLinkRequest(params: {
 
 export async function linkProfileAuthUser(params: {
   userId: string;
-  authUserId: string;
+  googleSub: string;
   email?: string;
 }): Promise<Profile> {
   const rows = await supabaseRequest<Profile[], Record<string, unknown>>({
@@ -573,7 +585,7 @@ export async function linkProfileAuthUser(params: {
     },
     prefer: "return=representation",
     body: {
-      auth_user_id: params.authUserId,
+      google_sub: params.googleSub,
       ...(params.email ? { email: params.email.trim().toLowerCase() } : {}),
     },
   });

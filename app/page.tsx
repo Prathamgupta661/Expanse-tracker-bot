@@ -17,8 +17,6 @@ import {
   YAxis,
 } from "recharts";
 
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-
 type InsightPeriod = "daily" | "weekly" | "monthly";
 
 interface ExpenseRow {
@@ -78,7 +76,6 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [insightNotice, setInsightNotice] = useState<string | null>(null);
   const [authState, setAuthState] = useState<AuthState | null>(null);
-  const [token, setToken] = useState<string | null>(null);
 
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -120,19 +117,13 @@ export default function Home() {
     }));
   }, [stats]);
 
-  const fetchDashboardData = async (authToken: string, selectedPeriod: InsightPeriod) => {
+  const fetchDashboardData = async (selectedPeriod: InsightPeriod) => {
     const [expensesRes, insightRes] = await Promise.all([
       fetch(`/api/expenses?limit=200`, {
         cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
       }),
       fetch(`/api/insights?period=${selectedPeriod}`, {
         cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
       }),
     ]);
 
@@ -178,26 +169,13 @@ export default function Home() {
 
     const bootstrap = async () => {
       try {
-        const supabase = getSupabaseBrowserClient();
-        const { data } = await supabase.auth.getSession();
-        const session = data.session;
-
-        if (!session?.access_token) {
+        const meRes = await fetch("/api/auth/me", {
+          cache: "no-store",
+        });
+        if (meRes.status === 401) {
           router.replace("/login?next=%2F");
           return;
         }
-
-        if (!active) {
-          return;
-        }
-
-        setToken(session.access_token);
-
-        const meRes = await fetch("/api/auth/me", {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
 
         const mePayload = (await meRes.json()) as AuthState & { error?: string; details?: string };
         if (!meRes.ok) {
@@ -210,7 +188,7 @@ export default function Home() {
 
         setAuthState(mePayload);
         if (mePayload.linked) {
-          await fetchDashboardData(session.access_token, "daily");
+          await fetchDashboardData("daily");
         }
       } catch (caught) {
         if (!active) {
@@ -228,7 +206,7 @@ export default function Home() {
   }, [router]);
 
   const loadDashboard = async () => {
-    if (!token) {
+    if (!authState?.linked) {
       return;
     }
 
@@ -236,7 +214,7 @@ export default function Home() {
     setError(null);
 
     try {
-      await fetchDashboardData(token, period);
+      await fetchDashboardData(period);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unknown error");
     } finally {
@@ -245,7 +223,7 @@ export default function Home() {
   };
 
   const regenerateInsight = async () => {
-    if (!token) {
+    if (!authState?.linked) {
       return;
     }
 
@@ -256,7 +234,6 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           period,
@@ -277,8 +254,9 @@ export default function Home() {
   };
 
   const signOut = async () => {
-    const supabase = getSupabaseBrowserClient();
-    await supabase.auth.signOut();
+    await fetch("/api/auth/logout", {
+      method: "POST",
+    });
     router.replace("/login?next=%2F");
   };
 

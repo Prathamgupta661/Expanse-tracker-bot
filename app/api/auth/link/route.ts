@@ -24,8 +24,8 @@ export async function POST(request: Request) {
 
     const profile = await consumeAuthLinkRequest({
       code,
-      authUserId: identity.authUserId,
-      authEmail: identity.email,
+      googleSub: identity.googleSub,
+      googleEmail: identity.email,
     });
 
     return NextResponse.json({
