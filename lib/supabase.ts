@@ -13,6 +13,7 @@ import {
   NewExpense,
   NewInsightRecord,
   Profile,
+  ProfileTelegramLink,
 } from "@/lib/types";
 
 type RestMethod = "GET" | "POST" | "PATCH" | "DELETE";
@@ -81,6 +82,18 @@ export function deriveUserIdFromTelegramId(telegramId: number): string {
 export async function getProfileByTelegramId(telegramId: number): Promise<Profile | null> {
   const rows = await supabaseRequest<Profile[]>({
     path: "profiles",
+    query: {
+      telegram_id: `eq.${telegramId}`,
+      limit: "1",
+      select: "*",
+    },
+  });
+  return rows[0] || null;
+}
+
+export async function getTelegramLinkByTelegramId(telegramId: number): Promise<ProfileTelegramLink | null> {
+  const rows = await supabaseRequest<ProfileTelegramLink[]>({
+    path: "profile_telegram_links",
     query: {
       telegram_id: `eq.${telegramId}`,
       limit: "1",
@@ -176,6 +189,35 @@ export async function upsertTelegramProfile(params: {
 
   if (!rows[0]) {
     throw new Error("Failed to upsert Telegram profile");
+  }
+  return rows[0];
+}
+
+export async function upsertProfileTelegramLink(params: {
+  ownerUserId: string;
+  telegramId: number;
+  telegramUsername?: string | null;
+  telegramFirstName?: string | null;
+  telegramLastName?: string | null;
+}): Promise<ProfileTelegramLink> {
+  const rows = await supabaseRequest<ProfileTelegramLink[], Array<Partial<ProfileTelegramLink>>>({
+    path: "profile_telegram_links",
+    method: "POST",
+    query: { on_conflict: "telegram_id", select: "*" },
+    prefer: "resolution=merge-duplicates,return=representation",
+    body: [
+      {
+        owner_user_id: params.ownerUserId,
+        telegram_id: params.telegramId,
+        telegram_username: params.telegramUsername || null,
+        telegram_first_name: params.telegramFirstName || null,
+        telegram_last_name: params.telegramLastName || null,
+      },
+    ],
+  });
+
+  if (!rows[0]) {
+    throw new Error("Failed to upsert Telegram profile link");
   }
   return rows[0];
 }

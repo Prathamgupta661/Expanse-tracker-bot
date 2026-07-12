@@ -27,6 +27,8 @@ interface ExpenseRow {
   merchant: string;
   note: string;
   expense_date: string;
+  added_by_telegram_id: number | null;
+  added_by_telegram_name: string | null;
 }
 
 interface DashboardStats {
@@ -66,6 +68,16 @@ function formatChartAmount(value: unknown): string {
     return "N/A";
   }
   return formatAmount(numeric);
+}
+
+function getAddedByLabel(expense: ExpenseRow): string {
+  if (expense.added_by_telegram_name) {
+    return expense.added_by_telegram_name;
+  }
+  if (expense.added_by_telegram_id) {
+    return `Telegram ${expense.added_by_telegram_id}`;
+  }
+  return "Self";
 }
 
 export default function Home() {
@@ -483,6 +495,7 @@ export default function Home() {
                   <th className="px-2 py-2">Merchant</th>
                   <th className="px-2 py-2">Category</th>
                   <th className="px-2 py-2">Note</th>
+                  <th className="px-2 py-2">Added By</th>
                   <th className="px-2 py-2 text-right">Amount</th>
                 </tr>
               </thead>
@@ -496,12 +509,13 @@ export default function Home() {
                       <td className="px-2 py-2">{expense.merchant}</td>
                       <td className="px-2 py-2">{expense.category}</td>
                       <td className="px-2 py-2 text-slate-400">{expense.note}</td>
+                      <td className="px-2 py-2 text-slate-300">{getAddedByLabel(expense)}</td>
                       <td className="px-2 py-2 text-right font-medium">{formatAmount(expense.amount)}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-2 py-6 text-center text-slate-400">
+                    <td colSpan={6} className="px-2 py-6 text-center text-slate-400">
                       No transactions loaded.
                     </td>
                   </tr>

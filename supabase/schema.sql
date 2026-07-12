@@ -16,6 +16,19 @@ create table if not exists public.profiles (
 alter table public.profiles
   add column if not exists google_sub text;
 
+create table if not exists public.profile_telegram_links (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references public.profiles (user_id) on delete cascade,
+  telegram_id bigint not null unique,
+  telegram_username text,
+  telegram_first_name text,
+  telegram_last_name text,
+  linked_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_user_id, telegram_id)
+);
+
 create table if not exists public.expenses (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (user_id) on delete cascade,
@@ -29,8 +42,14 @@ create table if not exists public.expenses (
   category_source text not null default 'rule' check (category_source in ('rule', 'ai', 'manual')),
   category_reason text,
   confidence numeric(4,3) not null default 1,
+  added_by_telegram_id bigint,
+  added_by_telegram_name text,
   created_at timestamptz not null default now()
 );
+
+alter table public.expenses
+  add column if not exists added_by_telegram_id bigint,
+  add column if not exists added_by_telegram_name text;
 
 create table if not exists public.budgets (
   id uuid primary key default gen_random_uuid(),
@@ -94,8 +113,12 @@ create table if not exists public.expense_categorization_jobs (
 
 create index if not exists idx_expenses_user_date on public.expenses (user_id, expense_date desc);
 create index if not exists idx_expenses_user_category on public.expenses (user_id, category);
+create index if not exists idx_expenses_added_by_telegram on public.expenses (added_by_telegram_id);
 create index if not exists idx_insights_user_generated on public.ai_insights (user_id, generated_at desc);
 create index if not exists idx_profiles_email on public.profiles (email);
+create index if not exists idx_profile_telegram_links_owner on public.profile_telegram_links (owner_user_id);
+create unique index if not exists idx_profile_telegram_links_telegram_unique
+  on public.profile_telegram_links (telegram_id);
 create unique index if not exists idx_profiles_google_sub_unique
   on public.profiles (google_sub)
   where google_sub is not null;
@@ -137,7 +160,14 @@ before update on public.expense_categorization_jobs
 for each row
 execute procedure public.set_updated_at();
 
+drop trigger if exists set_profile_telegram_links_updated_at on public.profile_telegram_links;
+create trigger set_profile_telegram_links_updated_at
+before update on public.profile_telegram_links
+for each row
+execute procedure public.set_updated_at();
+
 alter table public.profiles enable row level security;
+alter table public.profile_telegram_links enable row level security;
 alter table public.expenses enable row level security;
 alter table public.budgets enable row level security;
 alter table public.ai_insights enable row level security;
@@ -167,6 +197,27 @@ using (
     select 1
     from public.profiles p
     where p.user_id = expenses.user_id
+      and p.auth_user_id = auth.uid()
+  )
+);
+
+drop policy if exists "profile_telegram_links_all_own" on public.profile_telegram_links;
+create policy "profile_telegram_links_all_own"
+on public.profile_telegram_links
+for all
+using (
+  exists (
+    select 1
+    from public.profiles p
+    where p.user_id = profile_telegram_links.owner_user_id
+      and p.auth_user_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.profiles p
+    where p.user_id = profile_telegram_links.owner_user_id
       and p.auth_user_id = auth.uid()
   )
 );

@@ -30,6 +30,8 @@ export interface Expense {
   category_source: CategorySource;
   category_reason: string | null;
   confidence: number;
+  added_by_telegram_id: number | null;
+  added_by_telegram_name: string | null;
   created_at: string;
 }
 
@@ -45,6 +47,20 @@ export interface NewExpense {
   category_source?: CategorySource;
   category_reason?: string;
   confidence?: number;
+  added_by_telegram_id?: number | null;
+  added_by_telegram_name?: string | null;
+}
+
+export interface ProfileTelegramLink {
+  id: string;
+  owner_user_id: string;
+  telegram_id: number;
+  telegram_username: string | null;
+  telegram_first_name: string | null;
+  telegram_last_name: string | null;
+  linked_at: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ParsedExpenseLine {

@@ -9,10 +9,14 @@ import {
   createAuthLinkRequest,
   createIngestionEvent,
   getIngestionByUpdateId,
+  getProfileByUserId,
+  getTelegramLinkByTelegramId,
   insertExpenses,
   listExpensesByUser,
+  listProfilesByEmail,
   updateIngestionEvent,
   updateProfileEmailByUserId,
+  upsertProfileTelegramLink,
   upsertTelegramProfile,
 } from "@/lib/supabase";
 import { sendTelegramMessage, TelegramUpdate } from "@/lib/telegram";
@@ -55,10 +59,36 @@ function startOfMonthIso(now: Date): string {
   return date.toISOString();
 }
 
+function formatTelegramDisplayName(user: {
+  id: number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+}): string {
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  if (fullName && user.username) {
+    return `${fullName} (@${user.username})`;
+  }
+  if (fullName) {
+    return fullName;
+  }
+  if (user.username) {
+    return `@${user.username}`;
+  }
+  return `Telegram ${user.id}`;
+}
+
 async function handleCommand(params: {
   text: string;
   chatId: number;
-  userId: string;
+  ownerUserId: string;
+  senderUserId: string;
+  senderTelegram: {
+    id: number;
+    username?: string;
+    first_name?: string;
+    last_name?: string;
+  };
   currency: string;
   appBaseUrl: string;
 }) {
@@ -85,7 +115,7 @@ async function handleCommand(params: {
   }
 
   if (lower.startsWith("/today")) {
-    const expenses = await listExpensesByUser(params.userId, {
+    const expenses = await listExpensesByUser(params.ownerUserId, {
       from: startOfTodayIso(new Date()),
       limit: 500,
     });
@@ -98,7 +128,7 @@ async function handleCommand(params: {
   }
 
   if (lower.startsWith("/month")) {
-    const expenses = await listExpensesByUser(params.userId, {
+    const expenses = await listExpensesByUser(params.ownerUserId, {
       from: startOfMonthIso(new Date()),
       limit: 1000,
     });
@@ -123,7 +153,7 @@ async function handleCommand(params: {
     const shouldGenerate = lower.includes("refresh") || lower.includes("generate");
     const period = parseInsightPeriod(lower);
     const insight = await getInsightForUser({
-      userId: params.userId,
+      userId: params.ownerUserId,
       period,
       generate: shouldGenerate,
     });
@@ -167,13 +197,35 @@ async function handleCommand(params: {
     }
 
     try {
+      const profiles = await listProfilesByEmail(email);
+      const linkedOwner = profiles.find((profile) => Boolean(profile.google_sub));
+
+      if (linkedOwner) {
+        await upsertProfileTelegramLink({
+          ownerUserId: linkedOwner.user_id,
+          telegramId: params.senderTelegram.id,
+          telegramUsername: params.senderTelegram.username,
+          telegramFirstName: params.senderTelegram.first_name,
+          telegramLastName: params.senderTelegram.last_name,
+        });
+
+        await sendTelegramMessage(
+          params.chatId,
+          [
+            `Linked this Telegram account to ${email}.`,
+            "Future expenses from this account will appear in that dashboard.",
+          ].join("\n"),
+        );
+        return;
+      }
+
       await updateProfileEmailByUserId({
-        userId: params.userId,
+        userId: params.senderUserId,
         email,
       });
 
       const linkRequest = await createAuthLinkRequest({
-        userId: params.userId,
+        userId: params.senderUserId,
         email,
         ttlMinutes: 15,
       });
@@ -205,6 +257,8 @@ async function handleExpenseText(params: {
   userId: string;
   expenseDate: string;
   currency: string;
+  addedByTelegramId: number;
+  addedByTelegramName: string;
 }): Promise<{
   parsed: ReturnType<typeof parseExpenseMessage>;
   inserted?: Awaited<ReturnType<typeof insertExpenses>>;
@@ -237,6 +291,8 @@ async function handleExpenseText(params: {
     source: "telegram",
     category_source: "rule",
     confidence: 1,
+    added_by_telegram_id: params.addedByTelegramId,
+    added_by_telegram_name: params.addedByTelegramName,
   }));
 
   const inserted = await insertExpenses(rows);
@@ -250,6 +306,7 @@ async function handleExpenseText(params: {
       params.chatId,
       [
         `Saved ${inserted.length} expense(s), total ${formatCurrency(total, params.currency)}.`,
+        `Added by: ${params.addedByTelegramName}.`,
         categorizationStatus,
         invalidCount
           ? `Skipped ${invalidCount} line(s):\n${parsed.invalid
@@ -326,12 +383,54 @@ export async function POST(request: Request) {
       timezone: config.defaultTimezone,
       currency: config.defaultCurrency,
     });
+    const senderName = formatTelegramDisplayName(message.from);
+
+    let ownerUserId = profile.user_id;
+    let ownerCurrency = profile.currency;
+    try {
+      const memberLink = await getTelegramLinkByTelegramId(message.from.id);
+      if (memberLink && memberLink.owner_user_id !== profile.user_id) {
+        const ownerProfile = await getProfileByUserId(memberLink.owner_user_id);
+        if (ownerProfile) {
+          ownerUserId = ownerProfile.user_id;
+          ownerCurrency = ownerProfile.currency;
+        }
+      }
+    } catch (error) {
+      logEvent({
+        requestId,
+        route: "/api/telegram/webhook",
+        phase: "member_lookup_failed",
+        severity: "warn",
+        message: "Failed to resolve Telegram member link, using sender profile",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+
+    try {
+      await upsertProfileTelegramLink({
+        ownerUserId,
+        telegramId: message.from.id,
+        telegramUsername: message.from.username,
+        telegramFirstName: message.from.first_name,
+        telegramLastName: message.from.last_name,
+      });
+    } catch (error) {
+      logEvent({
+        requestId,
+        route: "/api/telegram/webhook",
+        phase: "member_upsert_failed",
+        severity: "warn",
+        message: "Failed to upsert Telegram member link",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
 
     const text = message.text?.trim() || "";
     const event =
       existing ||
       (await createIngestionEvent({
-        userId: profile.user_id,
+        userId: ownerUserId,
         rawText: text || "[non-text message]",
         sourceUpdateId: updateId,
       }));
@@ -353,8 +452,10 @@ export async function POST(request: Request) {
       await handleCommand({
         text,
         chatId: message.chat.id,
-        userId: profile.user_id,
-        currency: profile.currency,
+        ownerUserId,
+        senderUserId: profile.user_id,
+        senderTelegram: message.from,
+        currency: ownerCurrency,
         appBaseUrl,
       });
       await updateIngestionEvent({
@@ -367,9 +468,11 @@ export async function POST(request: Request) {
     const result = await handleExpenseText({
       text,
       chatId: message.chat.id,
-      userId: profile.user_id,
+      userId: ownerUserId,
       expenseDate,
-      currency: profile.currency,
+      currency: ownerCurrency,
+      addedByTelegramId: message.from.id,
+      addedByTelegramName: senderName,
     });
 
     if (result.messageError) {
