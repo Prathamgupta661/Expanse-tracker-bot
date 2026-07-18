@@ -1,5 +1,5 @@
 import { getSessionFromRequest } from "@/lib/auth-session";
-import { getProfileByAuthUserId, getProfileByGoogleSub } from "@/lib/supabase";
+import { getProfileByAuthUserId, getProfileByGoogleSub, listProfilesByEmail } from "@/lib/supabase";
 import { Profile } from "@/lib/types";
 
 function isUuid(value: string): boolean {
@@ -15,6 +15,17 @@ export async function resolveProfileFromRequest(request: Request): Promise<Profi
   const profileByGoogleSub = await getProfileByGoogleSub(identity.googleSub);
   if (profileByGoogleSub) {
     return profileByGoogleSub;
+  }
+
+  if (identity.googleSub.startsWith("dev:") && identity.email) {
+    const matches = await listProfilesByEmail(identity.email);
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    const linked = matches.find((item) => Boolean(item.google_sub));
+    if (linked) {
+      return linked;
+    }
   }
 
   // Legacy fallback for older records linked before direct Google auth migration.

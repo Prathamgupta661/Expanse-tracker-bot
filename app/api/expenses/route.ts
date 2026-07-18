@@ -5,7 +5,7 @@ import { config } from "@/lib/config";
 import { parseExpenseMessage } from "@/lib/expense-parser";
 import { getRequestId, logEvent } from "@/lib/logger";
 import { resolveProfileFromRequest } from "@/lib/request-user";
-import { insertExpenses, listExpensesByUser } from "@/lib/supabase";
+import { countExpensesByUser, insertExpenses, listExpensesByUser } from "@/lib/supabase";
 import { NewExpense } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -17,6 +17,8 @@ function badRequest(message: string): NextResponse {
 
 export async function GET(request: Request) {
   const requestId = getRequestId(request);
+  const maxLimit = 200;
+  const statsLimit = 5000;
   try {
     const profile = await resolveProfileFromRequest(request);
     if (!profile) {
@@ -26,19 +28,46 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const from = searchParams.get("from") || undefined;
     const to = searchParams.get("to") || undefined;
+    const includeStats = searchParams.get("includeStats") !== "false";
     const limitValue = searchParams.get("limit");
+    const offsetValue = searchParams.get("offset");
     const limit = limitValue ? Number.parseInt(limitValue, 10) : 200;
-    const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 200;
+    const offset = offsetValue ? Number.parseInt(offsetValue, 10) : 0;
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, maxLimit) : 200;
+    const safeOffset = Number.isFinite(offset) && offset >= 0 ? offset : 0;
 
     const expenses = await listExpensesByUser(profile.user_id, {
       from,
       to,
       limit: safeLimit,
+      offset: safeOffset,
     });
+
+    const statsSource = includeStats
+      ? await listExpensesByUser(profile.user_id, {
+          from,
+          to,
+          limit: statsLimit,
+          offset: 0,
+        })
+      : null;
+    const totalCount = await countExpensesByUser(profile.user_id, {
+      from,
+      to,
+    });
+    const totalPages = Math.max(1, Math.ceil(totalCount / safeLimit));
+    const page = Math.min(totalPages, Math.floor(safeOffset / safeLimit) + 1);
+    const hasMore = safeOffset + expenses.length < totalCount;
 
     return NextResponse.json({
       expenses,
-      stats: computeExpenseStats(expenses),
+      stats: statsSource ? computeExpenseStats(statsSource) : null,
+      totalCount,
+      totalPages,
+      page,
+      limit: safeLimit,
+      offset: safeOffset,
+      hasMore,
       requestId,
     });
   } catch (error) {

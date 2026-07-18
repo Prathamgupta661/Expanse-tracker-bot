@@ -17,6 +17,10 @@ This app includes:
    - Set Google OAuth vars:
      - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_AUTH_SECRET`
      - Optional: `GOOGLE_REDIRECT_URI` (defaults to `{APP_BASE_URL}/api/auth/google/callback`)
+   - Optional local dev auth bypass:
+     - `DEV_AUTH_ENABLED=true`
+     - `NEXT_PUBLIC_DEV_AUTH_ENABLED=true`
+     - Optional allowlist: `DEV_AUTH_ALLOWED_EMAILS=user1@example.com,user2@example.com`
    - For ngrok development, set:
      - `APP_BASE_URL` to your ngrok URL
 2. Run `supabase/schema.sql` in your Supabase SQL editor.
@@ -52,12 +56,14 @@ Commands:
 - Open `/login` and continue with Google.
 - After login, dashboard auto-loads your own expenses (no manual user id input).
 - If account not linked yet, run `/email ...` in Telegram and open the link from bot.
+- Local-only option: enable dev auth env vars and sign in from `/login` with email directly (no Google redirect).
 
 ## API Endpoints
 
 - `POST /api/telegram/webhook`
 - `GET /api/auth/google/start`
 - `GET /api/auth/google/callback`
+- `POST /api/auth/dev-login` (dev only; disabled in production)
 - `GET /api/auth/me`
 - `POST /api/auth/logout`
 - `POST /api/auth/link`

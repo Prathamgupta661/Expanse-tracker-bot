@@ -251,13 +251,14 @@ export async function updateProfileEmailByUserId(params: {
 
 export async function listExpensesByUser(
   userId: string,
-  options: { from?: string; to?: string; limit?: number; categorySources?: CategorySource[] } = {},
+  options: { from?: string; to?: string; limit?: number; offset?: number; categorySources?: CategorySource[] } = {},
 ): Promise<Expense[]> {
   const query: Record<string, string> = {
     user_id: `eq.${userId}`,
     order: "expense_date.desc",
     select: "*",
     limit: String(options.limit || 200),
+    offset: String(options.offset || 0),
   };
 
   if (options.from && options.to) {
@@ -282,6 +283,54 @@ export async function listExpensesByUser(
     amount: Number(row.amount),
     confidence: Number(row.confidence),
   }));
+}
+
+export async function countExpensesByUser(
+  userId: string,
+  options: { from?: string; to?: string; categorySources?: CategorySource[] } = {},
+): Promise<number> {
+  const query: Record<string, string> = {
+    user_id: `eq.${userId}`,
+    select: "id",
+    limit: "1",
+  };
+
+  if (options.from && options.to) {
+    query.and = `(expense_date.gte.${options.from},expense_date.lte.${options.to})`;
+  } else if (options.from) {
+    query.expense_date = `gte.${options.from}`;
+  } else if (options.to) {
+    query.expense_date = `lte.${options.to}`;
+  }
+
+  if (options.categorySources?.length) {
+    query.category_source = `in.(${options.categorySources.join(",")})`;
+  }
+
+  const key = config.getSupabaseServiceRoleKey();
+  const response = await fetch(buildUrl("expenses", query), {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      Prefer: "count=exact",
+    },
+  });
+
+  if (!response.ok) {
+    const payload = await response.text();
+    throw new Error(`Supabase GET expenses count failed (${response.status}): ${payload}`);
+  }
+
+  const contentRange = response.headers.get("content-range");
+  if (!contentRange) {
+    return 0;
+  }
+
+  const totalPart = contentRange.split("/")[1];
+  const parsed = totalPart ? Number.parseInt(totalPart, 10) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export async function getExpenseById(expenseId: string): Promise<Expense | null> {

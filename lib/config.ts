@@ -13,6 +13,8 @@ const ENV = {
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI?.trim(),
   APP_AUTH_SECRET: process.env.APP_AUTH_SECRET?.trim(),
   CRON_SECRET: process.env.CRON_SECRET?.trim(),
+  DEV_AUTH_ENABLED: process.env.DEV_AUTH_ENABLED?.trim(),
+  DEV_AUTH_ALLOWED_EMAILS: process.env.DEV_AUTH_ALLOWED_EMAILS?.trim(),
   DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE?.trim() || "Asia/Kolkata",
   DEFAULT_CURRENCY: process.env.DEFAULT_CURRENCY?.trim() || "INR",
   APP_BASE_URL: process.env.APP_BASE_URL?.trim(),
@@ -32,6 +34,19 @@ export const config = {
   openRouterInsightModel: ENV.OPENROUTER_INSIGHT_MODEL,
   telegramWebhookSecret: ENV.TELEGRAM_WEBHOOK_SECRET,
   cronSecret: ENV.CRON_SECRET,
+  isDevAuthEnabled() {
+    return process.env.NODE_ENV !== "production" && ENV.DEV_AUTH_ENABLED === "true";
+  },
+  getDevAuthAllowedEmails() {
+    const raw = ENV.DEV_AUTH_ALLOWED_EMAILS;
+    if (!raw) {
+      return [];
+    }
+    return raw
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+  },
   getTelegramToken() {
     return assertEnvValue(ENV.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
   },

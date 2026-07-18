@@ -53,6 +53,7 @@ interface AuthState {
 }
 
 const CHART_COLORS = ["#38bdf8", "#22d3ee", "#34d399", "#f59e0b", "#f43f5e", "#8b5cf6", "#94a3b8"];
+const PAGE_SIZE_OPTIONS = [10, 50, 100] as const;
 
 function formatAmount(amount: number): string {
   return new Intl.NumberFormat("en-IN", {
@@ -80,6 +81,25 @@ function getAddedByLabel(expense: ExpenseRow): string {
   return "Self";
 }
 
+function getPeriodRange(period: InsightPeriod, now = new Date()): { from: string; to: string } {
+  const end = now.toISOString();
+  if (period === "daily") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return { from: start.toISOString(), to: end };
+  }
+
+  if (period === "weekly") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    return { from: start.toISOString(), to: end };
+  }
+
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return { from: start.toISOString(), to: end };
+}
+
 export default function Home() {
   const router = useRouter();
 
@@ -88,6 +108,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [insightNotice, setInsightNotice] = useState<string | null>(null);
   const [authState, setAuthState] = useState<AuthState | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -129,9 +153,29 @@ export default function Home() {
     }));
   }, [stats]);
 
-  const fetchDashboardData = async (selectedPeriod: InsightPeriod) => {
-    const [expensesRes, insightRes] = await Promise.all([
-      fetch(`/api/expenses?limit=200`, {
+  const fetchDashboardData = async (
+    selectedPeriod: InsightPeriod,
+    page: number,
+    size: (typeof PAGE_SIZE_OPTIONS)[number],
+  ) => {
+    const { from, to } = getPeriodRange(selectedPeriod);
+    const tableParams = new URLSearchParams({
+      limit: String(size),
+      offset: String((page - 1) * size),
+      includeStats: "false",
+    });
+    const statsParams = new URLSearchParams({
+      limit: "1",
+      offset: "0",
+      from,
+      to,
+    });
+
+    const [tableRes, statsRes, insightRes] = await Promise.all([
+      fetch(`/api/expenses?${tableParams.toString()}`, {
+        cache: "no-store",
+      }),
+      fetch(`/api/expenses?${statsParams.toString()}`, {
         cache: "no-store",
       }),
       fetch(`/api/insights?period=${selectedPeriod}`, {
@@ -139,9 +183,16 @@ export default function Home() {
       }),
     ]);
 
-    const expensePayload = (await expensesRes.json()) as {
+    const tablePayload = (await tableRes.json()) as {
       expenses?: ExpenseRow[];
-      stats?: DashboardStats;
+      error?: string;
+      details?: string;
+      totalCount?: number;
+      totalPages?: number;
+      page?: number;
+    };
+    const statsPayload = (await statsRes.json()) as {
+      stats?: DashboardStats | null;
       error?: string;
       details?: string;
     };
@@ -153,12 +204,29 @@ export default function Home() {
       requestId?: string;
     };
 
-    if (!expensesRes.ok) {
-      throw new Error(expensePayload.error || expensePayload.details || "Failed to load expenses");
+    if (!tableRes.ok) {
+      throw new Error(tablePayload.error || tablePayload.details || "Failed to load expenses");
     }
 
-    setExpenses(expensePayload.expenses || []);
-    setStats(expensePayload.stats || null);
+    if (!statsRes.ok) {
+      throw new Error(statsPayload.error || statsPayload.details || "Failed to load stats");
+    }
+
+    setExpenses(tablePayload.expenses || []);
+    setStats(statsPayload.stats || null);
+    setTotalCount(
+      Number.isFinite(tablePayload.totalCount) ? Number(tablePayload.totalCount) : 0,
+    );
+    const resolvedTotalPages =
+      Number.isFinite(tablePayload.totalPages) && Number(tablePayload.totalPages) > 0
+        ? Number(tablePayload.totalPages)
+        : 1;
+    setTotalPages(resolvedTotalPages);
+    const resolvedPage =
+      Number.isFinite(tablePayload.page) && Number(tablePayload.page) > 0
+        ? Math.min(Number(tablePayload.page), resolvedTotalPages)
+        : page;
+    setCurrentPage(resolvedPage);
 
     if (!insightRes.ok) {
       setInsight(null);
@@ -200,7 +268,7 @@ export default function Home() {
 
         setAuthState(mePayload);
         if (mePayload.linked) {
-          await fetchDashboardData("daily");
+          await fetchDashboardData("daily", 1, pageSize);
         }
       } catch (caught) {
         if (!active) {
@@ -226,7 +294,47 @@ export default function Home() {
     setError(null);
 
     try {
-      await fetchDashboardData(period);
+      await fetchDashboardData(period, currentPage, pageSize);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changePage = async (nextPage: number) => {
+    if (!authState?.linked || loading || nextPage < 1 || nextPage > totalPages) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await fetchDashboardData(period, nextPage, pageSize);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changePageSize = async (nextSize: (typeof PAGE_SIZE_OPTIONS)[number]) => {
+    if (!authState?.linked || loading) {
+      setPageSize(nextSize);
+      setCurrentPage(1);
+      setTotalPages(1);
+      return;
+    }
+
+    setPageSize(nextSize);
+    setCurrentPage(1);
+    setTotalPages(1);
+    setLoading(true);
+    setError(null);
+
+    try {
+      await fetchDashboardData(period, 1, nextSize);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unknown error");
     } finally {
@@ -324,15 +432,34 @@ export default function Home() {
           <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">Expense Breakdown + AI Insight</h1>
           <p className="mt-2 text-sm text-slate-300">Logged in as {authState.email || "unknown"}</p>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
+          <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto_auto]">
             <select
               className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
               value={period}
-              onChange={(event) => setPeriod(event.target.value as InsightPeriod)}
+              onChange={(event) => {
+                setPeriod(event.target.value as InsightPeriod);
+                setCurrentPage(1);
+                setTotalPages(1);
+                setTotalCount(0);
+              }}
             >
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
               <option value="monthly">Monthly</option>
+            </select>
+            <select
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+              value={pageSize}
+              onChange={(event) =>
+                void changePageSize(Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number])
+              }
+              disabled={loading}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size} rows
+                </option>
+              ))}
             </select>
             <button
               className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
@@ -501,7 +628,7 @@ export default function Home() {
               </thead>
               <tbody>
                 {expenses.length ? (
-                  expenses.slice(0, 25).map((expense) => (
+                  expenses.map((expense) => (
                     <tr key={expense.id} className="border-t border-slate-800">
                       <td className="px-2 py-2 text-slate-300">
                         {new Date(expense.expense_date).toLocaleDateString("en-IN")}
@@ -522,6 +649,25 @@ export default function Home() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-4 flex items-center justify-between">
+            <button
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              onClick={() => void changePage(currentPage - 1)}
+              disabled={loading || currentPage <= 1}
+            >
+              Previous
+            </button>
+            <p className="text-sm text-slate-400">
+              Page {Math.min(currentPage, totalPages)} of {totalPages} ({totalCount} transactions)
+            </p>
+            <button
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              onClick={() => void changePage(currentPage + 1)}
+              disabled={loading || currentPage >= totalPages}
+            >
+              Next
+            </button>
           </div>
         </section>
       </main>
