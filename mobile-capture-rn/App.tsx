@@ -268,6 +268,8 @@ export default function App() {
             </View>
           ))
         )}
+
+        <Text style={styles.footer}>Made by Pratham</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -356,5 +358,12 @@ const styles = StyleSheet.create({
   logPreview: {
     color: "#cbd5e1",
     fontSize: 13,
+  },
+  footer: {
+    color: "#64748b",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 24,
+    marginBottom: 8,
   },
 });
