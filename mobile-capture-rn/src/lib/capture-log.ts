@@ -3,7 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const LOG_KEY = "capture_log_v1";
 const LISTENER_SEEN_KEY = "capture_listener_seen_v1";
 const MAX_ENTRIES = 30;
-const PREVIEW_LENGTH = 160;
+// Long enough to keep the whole notification/SMS, so a skipped entry can be resent as-is.
+const PREVIEW_LENGTH = 1000;
 
 export interface CaptureLogEntry {
   at: string;
@@ -50,6 +51,15 @@ export function appendCaptureLog(entry: Omit<CaptureLogEntry, "at">): Promise<vo
       at: new Date().toISOString(),
     });
     await AsyncStorage.setItem(LOG_KEY, JSON.stringify(log.slice(0, MAX_ENTRIES)));
+  });
+}
+
+/** Entries are identified by their timestamp, which is unique in practice for this log. */
+export function updateCaptureLogResult(at: string, result: string): Promise<void> {
+  return withLogLock(async () => {
+    const log = await readLog();
+    const next = log.map((entry) => (entry.at === at ? { ...entry, result } : entry));
+    await AsyncStorage.setItem(LOG_KEY, JSON.stringify(next));
   });
 }
 

@@ -68,10 +68,17 @@ export function buildMobileFingerprintVariants(params: {
   );
 }
 
-export function getMobileDedupeWindow(capturedAt: Date | string): { from: string; to: string } {
+// A UPI reference identifies one transaction, so it can be matched across a much wider window:
+// SMS apps re-post old notifications, and queued events can arrive minutes or hours late.
+export const REFERENCE_DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function getMobileDedupeWindow(
+  capturedAt: Date | string,
+  windowMs: number = DEDUPE_WINDOW_MS,
+): { from: string; to: string } {
   const capturedAtMs = toCapturedTimeMs(capturedAt);
   return {
-    from: new Date(capturedAtMs - DEDUPE_WINDOW_MS).toISOString(),
-    to: new Date(capturedAtMs + DEDUPE_WINDOW_MS).toISOString(),
+    from: new Date(capturedAtMs - windowMs).toISOString(),
+    to: new Date(capturedAtMs + windowMs).toISOString(),
   };
 }

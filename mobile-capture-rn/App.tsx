@@ -22,11 +22,12 @@ import {
   clearCaptureLog,
   readCaptureLog,
   readListenerSeen,
+  updateCaptureLogResult,
   type CaptureLogEntry,
   type ListenerSeen,
 } from "./src/lib/capture-log";
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./src/lib/config";
-import { flushQueue, sendOrQueue } from "./src/lib/ingest";
+import { flushQueue, sendOrQueue, sendOrQueueDetailed } from "./src/lib/ingest";
 import type { CaptureConfig } from "./src/lib/types";
 
 function Field(props: {
@@ -59,6 +60,11 @@ function ActionButton(props: { title: string; onPress: () => void }) {
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString();
+}
+
+/** Skipped or dropped entries never reached the server's expense list, so allow a manual send. */
+function canResend(entry: CaptureLogEntry): boolean {
+  return entry.result.startsWith("skipped") || entry.result.startsWith("dropped");
 }
 
 export default function App() {
@@ -152,6 +158,25 @@ export default function App() {
     setStatus(`Queue flush: sent ${result.sent}, failed ${result.failed}, dropped ${result.dropped}`);
   };
 
+  const onResendEntry = async (entry: CaptureLogEntry) => {
+    if (!canSend) {
+      Alert.alert("Missing config", "Please set backend URL, user UUID, and secret.");
+      return;
+    }
+
+    // A stable event id lets the server dedupe repeated taps on the same entry.
+    const result = await sendOrQueueDetailed(config, {
+      eventId: `resend:${entry.channel}:${entry.at}`,
+      channel: entry.channel,
+      message: entry.preview,
+      appOrSender: entry.source,
+      capturedAt: entry.at,
+    });
+    await updateCaptureLogResult(entry.at, `resent: ${result}`);
+    await refreshLog();
+    setStatus(`Resend: ${result}`);
+  };
+
   const onClearLog = async () => {
     await clearCaptureLog();
     await refreshLog();
@@ -234,7 +259,12 @@ export default function App() {
                 {formatTime(entry.at)} · {entry.channel} · {entry.source ?? "unknown"}
               </Text>
               <Text style={styles.logResult}>{entry.result}</Text>
-              <Text style={styles.logPreview}>{entry.preview}</Text>
+              <Text style={styles.logPreview} numberOfLines={4}>
+                {entry.preview}
+              </Text>
+              {canResend(entry) ? (
+                <ActionButton title="Send to server" onPress={() => void onResendEntry(entry)} />
+              ) : null}
             </View>
           ))
         )}

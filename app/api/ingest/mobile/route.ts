@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { buildMobileFingerprint, buildMobileFingerprintVariants, getMobileDedupeWindow } from "@/lib/mobile-dedupe";
+import {
+  buildMobileFingerprint,
+  buildMobileFingerprintVariants,
+  getMobileDedupeWindow,
+  REFERENCE_DEDUPE_WINDOW_MS,
+} from "@/lib/mobile-dedupe";
 import { verifyMobileIngestSignature } from "@/lib/mobile-ingest-auth";
 import { getRequestId, logEvent } from "@/lib/logger";
 import {
@@ -239,7 +244,10 @@ export async function POST(request: Request) {
       merchantOrReference: fingerprintToken,
       capturedAt: payload.capturedAtIso,
     });
-    const window = getMobileDedupeWindow(payload.capturedAtIso);
+    const reference = parsed.value.reference;
+    const window = reference
+      ? getMobileDedupeWindow(payload.capturedAtIso, REFERENCE_DEDUPE_WINDOW_MS)
+      : getMobileDedupeWindow(payload.capturedAtIso);
 
     const candidates = await listExpensesByUser(payload.userId, {
       from: window.from,
@@ -249,6 +257,14 @@ export async function POST(request: Request) {
     });
 
     const duplicate = candidates.find((item) => {
+      if (
+        reference &&
+        getMobileMeta(item) &&
+        Number(item.amount) === parsed.value.amount &&
+        item.note.toUpperCase().includes(reference)
+      ) {
+        return true;
+      }
       const meta = getMobileMeta(item);
       return Boolean(meta && fingerprintVariants.includes(meta.fingerprint));
     });
