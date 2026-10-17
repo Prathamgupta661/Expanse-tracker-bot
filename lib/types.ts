@@ -4,6 +4,16 @@ export type ExpenseSource = "telegram" | "dashboard";
 export type CategorySource = "rule" | "ai" | "manual";
 export type CategorizationJobStatus = "pending" | "processing" | "done" | "failed";
 
+export interface MobileExpenseMeta {
+  event_id: string;
+  channel: "notification" | "sms";
+  app_or_sender: string | null;
+  payload_hash: string;
+  fingerprint: string;
+  captured_at: string;
+  duplicate_of_expense_id?: string | null;
+}
+
 export interface Profile {
   user_id: string;
   telegram_id: number | null;
@@ -30,6 +40,7 @@ export interface Expense {
   category_source: CategorySource;
   category_reason: string | null;
   confidence: number;
+  mobile_meta: MobileExpenseMeta | null;
   added_by_telegram_id: number | null;
   added_by_telegram_name: string | null;
   created_at: string;
@@ -47,6 +58,7 @@ export interface NewExpense {
   category_source?: CategorySource;
   category_reason?: string;
   confidence?: number;
+  mobile_meta?: MobileExpenseMeta | null;
   added_by_telegram_id?: number | null;
   added_by_telegram_name?: string | null;
 }

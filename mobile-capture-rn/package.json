@@ -1,0 +1,34 @@
+{
+  "name": "expense-capture-rn",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --dev-client --tunnel",
+    "start:local": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~5.0.5",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "crypto-js": "^4.2.0",
+    "expo": "^53.0.0",
+    "expo-dev-client": "^5.2.2",
+    "react": "19.0.0",
+    "react-dom": "^19.0.0",
+    "react-native": "0.79.5",
+    "react-native-android-notification-listener": "^5.0.1",
+    "react-native-sms-receiver": "^1.0.0",
+    "react-native-web": "^0.20.0"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/react": "^19.0.14",
+    "patch-package": "^8.0.1",
+    "typescript": "^5.6.3"
+  }
+}

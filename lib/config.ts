@@ -12,6 +12,8 @@ const ENV = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET?.trim(),
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI?.trim(),
   APP_AUTH_SECRET: process.env.APP_AUTH_SECRET?.trim(),
+  MOBILE_INGEST_SECRET: process.env.MOBILE_INGEST_SECRET?.trim(),
+  MOBILE_INGEST_MAX_SKEW_SECONDS: process.env.MOBILE_INGEST_MAX_SKEW_SECONDS?.trim(),
   CRON_SECRET: process.env.CRON_SECRET?.trim(),
   DEV_AUTH_ENABLED: process.env.DEV_AUTH_ENABLED?.trim(),
   DEV_AUTH_ALLOWED_EMAILS: process.env.DEV_AUTH_ALLOWED_EMAILS?.trim(),
@@ -27,6 +29,17 @@ function assertEnvValue(value: string | undefined, key: keyof typeof ENV): strin
   return value;
 }
 
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
 export const config = {
   appBaseUrl: ENV.APP_BASE_URL,
   defaultTimezone: ENV.DEFAULT_TIMEZONE,
@@ -34,6 +47,7 @@ export const config = {
   openRouterInsightModel: ENV.OPENROUTER_INSIGHT_MODEL,
   telegramWebhookSecret: ENV.TELEGRAM_WEBHOOK_SECRET,
   cronSecret: ENV.CRON_SECRET,
+  mobileIngestMaxSkewSeconds: parsePositiveInteger(ENV.MOBILE_INGEST_MAX_SKEW_SECONDS, 300),
   isDevAuthEnabled() {
     return process.env.NODE_ENV !== "production" && ENV.DEV_AUTH_ENABLED === "true";
   },
@@ -73,5 +87,8 @@ export const config = {
   },
   getAppAuthSecret() {
     return assertEnvValue(ENV.APP_AUTH_SECRET, "APP_AUTH_SECRET");
+  },
+  getMobileIngestSecret() {
+    return assertEnvValue(ENV.MOBILE_INGEST_SECRET, "MOBILE_INGEST_SECRET");
   },
 } as const;

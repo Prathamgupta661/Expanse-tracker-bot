@@ -42,12 +42,14 @@ create table if not exists public.expenses (
   category_source text not null default 'rule' check (category_source in ('rule', 'ai', 'manual')),
   category_reason text,
   confidence numeric(4,3) not null default 1,
+  mobile_meta jsonb,
   added_by_telegram_id bigint,
   added_by_telegram_name text,
   created_at timestamptz not null default now()
 );
 
 alter table public.expenses
+  add column if not exists mobile_meta jsonb,
   add column if not exists added_by_telegram_id bigint,
   add column if not exists added_by_telegram_name text;
 
@@ -165,6 +167,7 @@ create trigger set_profile_telegram_links_updated_at
 before update on public.profile_telegram_links
 for each row
 execute procedure public.set_updated_at();
+
 
 alter table public.profiles enable row level security;
 alter table public.profile_telegram_links enable row level security;

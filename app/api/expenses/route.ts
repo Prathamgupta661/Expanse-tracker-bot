@@ -6,7 +6,7 @@ import { parseExpenseMessage } from "@/lib/expense-parser";
 import { getRequestId, logEvent } from "@/lib/logger";
 import { resolveProfileFromRequest } from "@/lib/request-user";
 import { countExpensesByUser, insertExpenses, listExpensesByUser } from "@/lib/supabase";
-import { NewExpense } from "@/lib/types";
+import { ExpenseSource, NewExpense } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as {
-      source?: "telegram" | "dashboard";
+      source?: ExpenseSource;
       text?: string;
       amount?: number;
       note?: string;

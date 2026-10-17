@@ -23,10 +23,14 @@ interface ExpenseRow {
   id: string;
   amount: number;
   currency: string;
+  source: "telegram" | "dashboard";
   category: string;
   merchant: string;
   note: string;
   expense_date: string;
+  mobile_meta?: {
+    channel?: "notification" | "sms";
+  } | null;
   added_by_telegram_id: number | null;
   added_by_telegram_name: string | null;
 }
@@ -72,6 +76,9 @@ function formatChartAmount(value: unknown): string {
 }
 
 function getAddedByLabel(expense: ExpenseRow): string {
+  if (expense.mobile_meta?.channel) {
+    return "Auto Capture";
+  }
   if (expense.added_by_telegram_name) {
     return expense.added_by_telegram_name;
   }
@@ -79,6 +86,19 @@ function getAddedByLabel(expense: ExpenseRow): string {
     return `Telegram ${expense.added_by_telegram_id}`;
   }
   return "Self";
+}
+
+function getSourceLabel(expense: ExpenseRow): string {
+  if (expense.mobile_meta?.channel === "notification") {
+    return "Mobile (Notification)";
+  }
+  if (expense.mobile_meta?.channel === "sms") {
+    return "Mobile (SMS)";
+  }
+  if (expense.source === "telegram") {
+    return "Telegram";
+  }
+  return "Dashboard";
 }
 
 function getPeriodRange(period: InsightPeriod, now = new Date()): { from: string; to: string } {
@@ -283,7 +303,7 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [router, pageSize]);
 
   const loadDashboard = async () => {
     if (!authState?.linked) {
@@ -622,6 +642,7 @@ export default function Home() {
                   <th className="px-2 py-2">Merchant</th>
                   <th className="px-2 py-2">Category</th>
                   <th className="px-2 py-2">Note</th>
+                  <th className="px-2 py-2">Source</th>
                   <th className="px-2 py-2">Added By</th>
                   <th className="px-2 py-2 text-right">Amount</th>
                 </tr>
@@ -636,13 +657,14 @@ export default function Home() {
                       <td className="px-2 py-2">{expense.merchant}</td>
                       <td className="px-2 py-2">{expense.category}</td>
                       <td className="px-2 py-2 text-slate-400">{expense.note}</td>
+                      <td className="px-2 py-2 text-slate-300">{getSourceLabel(expense)}</td>
                       <td className="px-2 py-2 text-slate-300">{getAddedByLabel(expense)}</td>
                       <td className="px-2 py-2 text-right font-medium">{formatAmount(expense.amount)}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-2 py-6 text-center text-slate-400">
+                    <td colSpan={7} className="px-2 py-6 text-center text-slate-400">
                       No transactions loaded.
                     </td>
                   </tr>

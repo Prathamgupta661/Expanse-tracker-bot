@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Expense Capture",
+    "slug": "expense-capture-rn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.expensebot.capture.rn",
+      "allowBackup": false,
+      "permissions": [
+        "INTERNET",
+        "RECEIVE_SMS",
+        "READ_SMS"
+      ]
+    },
+    "plugins": [
+      "expo-dev-client"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b880309a-3d63-4604-a7bc-805f41a641ce"
+      }
+    },
+    "owner": "prathamgupta01"
+  }
+}
