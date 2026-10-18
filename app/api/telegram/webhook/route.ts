@@ -387,8 +387,10 @@ export async function POST(request: Request) {
 
     let ownerUserId = profile.user_id;
     let ownerCurrency = profile.currency;
+    let memberLink: Awaited<ReturnType<typeof getTelegramLinkByTelegramId>> = null;
+    let memberLookupFailed = false;
     try {
-      const memberLink = await getTelegramLinkByTelegramId(message.from.id);
+      memberLink = await getTelegramLinkByTelegramId(message.from.id);
       if (memberLink && memberLink.owner_user_id !== profile.user_id) {
         const ownerProfile = await getProfileByUserId(memberLink.owner_user_id);
         if (ownerProfile) {
@@ -397,6 +399,7 @@ export async function POST(request: Request) {
         }
       }
     } catch (error) {
+      memberLookupFailed = true;
       logEvent({
         requestId,
         route: "/api/telegram/webhook",
@@ -408,13 +411,17 @@ export async function POST(request: Request) {
     }
 
     try {
-      await upsertProfileTelegramLink({
-        ownerUserId,
-        telegramId: message.from.id,
-        telegramUsername: message.from.username,
-        telegramFirstName: message.from.first_name,
-        telegramLastName: message.from.last_name,
-      });
+      // Only refresh the sender's name here. The owner is changed solely by /email, so a failed
+      // lookup must not overwrite an existing membership with the sender's own profile.
+      if (!memberLookupFailed) {
+        await upsertProfileTelegramLink({
+          ownerUserId: memberLink?.owner_user_id ?? profile.user_id,
+          telegramId: message.from.id,
+          telegramUsername: message.from.username,
+          telegramFirstName: message.from.first_name,
+          telegramLastName: message.from.last_name,
+        });
+      }
     } catch (error) {
       logEvent({
         requestId,

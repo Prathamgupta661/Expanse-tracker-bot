@@ -12,7 +12,7 @@ export const DEFAULT_CONFIG: CaptureConfig = {
   notificationEnabled: true,
   smsEnabled: true,
   appFilters:
-    "com.google.android.apps.nbu.paisa.user,com.phonepe.app,net.one97.paytm,in.org.npci.upiapp,com.google.android.apps.messaging",
+    "com.google.android.apps.nbu.paisa.user,com.phonepe.app,net.one97.paytm,in.org.npci.upiapp,com.google.android.apps.messaging,com.android.mms,com.samsung.android.messaging",
   smsFilters: "hdfcbk,icicib,sbiinb,axisbk,boiind",
 };
 
