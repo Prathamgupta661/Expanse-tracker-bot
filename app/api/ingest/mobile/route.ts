@@ -17,7 +17,7 @@ import {
   listExpensesByUser,
   updateIngestionEvent,
 } from "@/lib/supabase";
-import { Expense, MobileExpenseMeta, NewExpense } from "@/lib/types";
+import { Expense, MobileExpenseLocation, MobileExpenseMeta, NewExpense } from "@/lib/types";
 import { parseUpiMobileMessage } from "@/lib/upi-mobile-parser";
 
 export const runtime = "nodejs";
@@ -30,6 +30,36 @@ interface NormalizedMobilePayload {
   message: string;
   appOrSender: string | null;
   capturedAtIso: string;
+  location: MobileExpenseLocation | null;
+}
+
+/** Location is optional and best effort: anything malformed is dropped instead of rejecting the expense. */
+function readLocation(value: unknown, fallbackCapturedAtIso: string): MobileExpenseLocation | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const latitude = raw.latitude;
+  const longitude = raw.longitude;
+  if (typeof latitude !== "number" || !Number.isFinite(latitude) || Math.abs(latitude) > 90) {
+    return null;
+  }
+  if (typeof longitude !== "number" || !Number.isFinite(longitude) || Math.abs(longitude) > 180) {
+    return null;
+  }
+
+  const accuracy = typeof raw.accuracy === "number" && Number.isFinite(raw.accuracy) && raw.accuracy >= 0
+    ? raw.accuracy
+    : null;
+  const capturedAt = new Date(readTrimmedString(raw.captured_at) || fallbackCapturedAtIso);
+
+  return {
+    latitude,
+    longitude,
+    accuracy,
+    captured_at: Number.isFinite(capturedAt.getTime()) ? capturedAt.toISOString() : fallbackCapturedAtIso,
+  };
 }
 
 // Profile ids come from deriveUserIdFromTelegramId (hashed hex in UUID shape), so they
@@ -93,6 +123,7 @@ function normalizePayload(body: unknown): { ok: true; value: NormalizedMobilePay
       message,
       appOrSender,
       capturedAtIso: capturedAt.toISOString(),
+      location: readLocation(raw.location, capturedAt.toISOString()),
     },
   };
 }
@@ -303,6 +334,7 @@ export async function POST(request: Request) {
       fingerprint,
       captured_at: payload.capturedAtIso,
       duplicate_of_expense_id: null,
+      location: payload.location,
     };
 
     const expenseRows: NewExpense[] = [

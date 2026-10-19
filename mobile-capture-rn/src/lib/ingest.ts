@@ -109,6 +109,14 @@ async function sendEvent(
     message: event.message,
     app_or_sender: event.appOrSender,
     captured_at: event.capturedAt,
+    location: event.location
+      ? {
+          latitude: event.location.latitude,
+          longitude: event.location.longitude,
+          accuracy: event.location.accuracy,
+          captured_at: event.location.capturedAt,
+        }
+      : undefined,
   };
 
   const body = JSON.stringify(payload);

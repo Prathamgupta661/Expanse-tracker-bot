@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   AppState,
+  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -28,6 +29,7 @@ import {
 } from "./src/lib/capture-log";
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./src/lib/config";
 import { flushQueue, sendOrQueue, sendOrQueueDetailed } from "./src/lib/ingest";
+import { requestLocationPermission } from "./src/lib/location";
 import type { CaptureConfig } from "./src/lib/types";
 
 function Field(props: {
@@ -136,6 +138,15 @@ export default function App() {
     setStatus(granted ? "SMS permission granted" : "SMS permission denied");
   };
 
+  const onGrantLocation = async () => {
+    const granted = await requestLocationPermission();
+    setStatus(
+      granted
+        ? "Location access granted (all the time)"
+        : "Location not granted - choose \"Allow all the time\" to capture payment location",
+    );
+  };
+
   const onSendTest = async () => {
     if (!canSend) {
       Alert.alert("Missing config", "Please set backend URL, user UUID, and secret.");
@@ -177,6 +188,21 @@ export default function App() {
     setStatus(`Resend: ${result}`);
   };
 
+  // The web dashboard is served from the same backend that receives ingested events.
+  const onOpenDashboard = async () => {
+    const baseUrl = config.baseUrl.trim().replace(/\/$/, "");
+    if (!baseUrl) {
+      Alert.alert("Missing config", "Please set the backend URL first.");
+      return;
+    }
+
+    try {
+      await Linking.openURL(`${baseUrl}/`);
+    } catch {
+      Alert.alert("Could not open dashboard", `Check the backend URL: ${baseUrl}`);
+    }
+  };
+
   const onClearLog = async () => {
     await clearCaptureLog();
     await refreshLog();
@@ -203,6 +229,14 @@ export default function App() {
           <Switch
             value={config.smsEnabled}
             onValueChange={(value) => setConfig((prev) => ({ ...prev, smsEnabled: value }))}
+          />
+        </View>
+
+        <View style={styles.switchRow}>
+          <Text style={styles.label}>Capture Payment Location</Text>
+          <Switch
+            value={config.locationEnabled}
+            onValueChange={(value) => setConfig((prev) => ({ ...prev, locationEnabled: value }))}
           />
         </View>
 
@@ -236,8 +270,10 @@ export default function App() {
         <ActionButton title="Save Settings" onPress={() => void onSave()} />
         <ActionButton title="Grant Notification Access" onPress={() => void onGrantNotification()} />
         <ActionButton title="Grant SMS Permission" onPress={() => void onGrantSms()} />
+        <ActionButton title="Grant Location Permission" onPress={() => void onGrantLocation()} />
         <ActionButton title="Send Test Event" onPress={() => void onSendTest()} />
         <ActionButton title="Flush Queue" onPress={() => void onFlushQueue()} />
+        <ActionButton title="Open Dashboard" onPress={() => void onOpenDashboard()} />
 
         <Text style={styles.status}>Status: {status}</Text>
 

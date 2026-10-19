@@ -14,6 +14,8 @@ export const DEFAULT_CONFIG: CaptureConfig = {
   appFilters:
     "com.google.android.apps.nbu.paisa.user,com.phonepe.app,net.one97.paytm,in.org.npci.upiapp,com.google.android.apps.messaging,com.android.mms,com.samsung.android.messaging",
   smsFilters: "hdfcbk,icicib,sbiinb,axisbk,boiind",
+  // Off by default: location is sensitive and needs the "Allow all the time" permission.
+  locationEnabled: false,
 };
 
 export async function loadConfig(): Promise<CaptureConfig> {

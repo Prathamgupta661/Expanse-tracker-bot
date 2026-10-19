@@ -6,6 +6,14 @@ export interface CaptureConfig {
   smsEnabled: boolean;
   appFilters: string;
   smsFilters: string;
+  locationEnabled: boolean;
+}
+
+export interface PaymentLocation {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  capturedAt: string;
 }
 
 export interface IngestEvent {
@@ -14,4 +22,5 @@ export interface IngestEvent {
   message: string;
   appOrSender: string | null;
   capturedAt: string;
+  location?: PaymentLocation | null;
 }

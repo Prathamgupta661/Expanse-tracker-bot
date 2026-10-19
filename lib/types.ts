@@ -4,6 +4,13 @@ export type ExpenseSource = "telegram" | "dashboard";
 export type CategorySource = "rule" | "ai" | "manual";
 export type CategorizationJobStatus = "pending" | "processing" | "done" | "failed";
 
+export interface MobileExpenseLocation {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  captured_at: string;
+}
+
 export interface MobileExpenseMeta {
   event_id: string;
   channel: "notification" | "sms";
@@ -12,6 +19,7 @@ export interface MobileExpenseMeta {
   fingerprint: string;
   captured_at: string;
   duplicate_of_expense_id?: string | null;
+  location?: MobileExpenseLocation | null;
 }
 
 export interface Profile {

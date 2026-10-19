@@ -30,6 +30,7 @@ interface ExpenseRow {
   expense_date: string;
   mobile_meta?: {
     channel?: "notification" | "sms";
+    location?: { latitude: number; longitude: number } | null;
   } | null;
   added_by_telegram_id: number | null;
   added_by_telegram_name: string | null;
@@ -657,7 +658,19 @@ export default function Home() {
                       <td className="px-2 py-2">{expense.merchant}</td>
                       <td className="px-2 py-2">{expense.category}</td>
                       <td className="px-2 py-2 text-slate-400">{expense.note}</td>
-                      <td className="px-2 py-2 text-slate-300">{getSourceLabel(expense)}</td>
+                      <td className="px-2 py-2 text-slate-300">
+                        {getSourceLabel(expense)}
+                        {expense.mobile_meta?.location ? (
+                          <a
+                            href={`https://www.google.com/maps?q=${expense.mobile_meta.location.latitude},${expense.mobile_meta.location.longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-2 text-sky-400 hover:underline"
+                          >
+                            Map
+                          </a>
+                        ) : null}
+                      </td>
                       <td className="px-2 py-2 text-slate-300">{getAddedByLabel(expense)}</td>
                       <td className="px-2 py-2 text-right font-medium">{formatAmount(expense.amount)}</td>
                     </tr>

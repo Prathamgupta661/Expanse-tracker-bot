@@ -8,6 +8,7 @@ import type { CaptureConfig, IngestEvent } from "./types";
 import { appendCaptureLog, recordListenerSeen } from "./capture-log";
 import { loadConfig } from "./config";
 import { sendOrQueueDetailed } from "./ingest";
+import { getPaymentLocation } from "./location";
 
 export const NOTIFICATION_HEADLESS_TASK_NAME =
   NotificationListenerAndroidHeadlessJsName ||
@@ -23,17 +24,21 @@ const SmsReceiverNative = NativeModules.SmsReceiver as
 let smsNativeStarted = false;
 let smsSubscription: { remove: () => void } | null = null;
 
-function makeEvent(params: {
+async function makeEvent(params: {
   channel: "notification" | "sms";
   message: string;
   source: string | null;
-}): IngestEvent {
+  config: CaptureConfig;
+}): Promise<IngestEvent> {
+  const capturedAt = new Date().toISOString();
   return {
     eventId: `${params.channel}:${Date.now()}:${Math.floor(Math.random() * 1_000_000)}`,
     channel: params.channel,
     message: params.message,
     appOrSender: params.source,
-    capturedAt: new Date().toISOString(),
+    capturedAt,
+    // Looked up only for events that passed the filters, so other notifications cost nothing.
+    location: params.config.locationEnabled ? await getPaymentLocation() : null,
   };
 }
 
@@ -190,10 +195,11 @@ export async function startSmsListener(config: CaptureConfig): Promise<void> {
 
       const result = await sendOrQueueDetailed(
         config,
-        makeEvent({
+        await makeEvent({
           channel: "sms",
           message: body,
           source: sender,
+          config,
         }),
       );
       await log(result);
@@ -269,10 +275,11 @@ export async function notificationHeadlessTask(input: unknown): Promise<void> {
     return;
   }
 
-  const event = makeEvent({
+  const event = await makeEvent({
     channel: "notification",
     message: text,
     source: sourceApp,
+    config,
   });
 
   await log(await sendOrQueueDetailed(config, event));
