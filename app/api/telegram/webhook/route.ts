@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { computeExpenseStats, formatCurrency } from "@/lib/analytics";
 import { config } from "@/lib/config";
+import { formatTelegramDisplayName } from "@/lib/expense-labels";
 import { parseExpenseMessage } from "@/lib/expense-parser";
 import { getInsightForUser } from "@/lib/insights";
 import { getRequestId, logEvent } from "@/lib/logger";
@@ -59,24 +60,6 @@ function startOfMonthIso(now: Date): string {
   return date.toISOString();
 }
 
-function formatTelegramDisplayName(user: {
-  id: number;
-  username?: string;
-  first_name?: string;
-  last_name?: string;
-}): string {
-  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-  if (fullName && user.username) {
-    return `${fullName} (@${user.username})`;
-  }
-  if (fullName) {
-    return fullName;
-  }
-  if (user.username) {
-    return `@${user.username}`;
-  }
-  return `Telegram ${user.id}`;
-}
 
 async function handleCommand(params: {
   text: string;
@@ -114,8 +97,10 @@ async function handleCommand(params: {
     return;
   }
 
+  // Read commands use the sender's own profile. Membership only lets a member add expenses to
+  // the owner's account; it must not expose the owner's totals or insights to them.
   if (lower.startsWith("/today")) {
-    const expenses = await listExpensesByUser(params.ownerUserId, {
+    const expenses = await listExpensesByUser(params.senderUserId, {
       from: startOfTodayIso(new Date()),
       limit: 500,
     });
@@ -128,7 +113,7 @@ async function handleCommand(params: {
   }
 
   if (lower.startsWith("/month")) {
-    const expenses = await listExpensesByUser(params.ownerUserId, {
+    const expenses = await listExpensesByUser(params.senderUserId, {
       from: startOfMonthIso(new Date()),
       limit: 1000,
     });
@@ -153,7 +138,7 @@ async function handleCommand(params: {
     const shouldGenerate = lower.includes("refresh") || lower.includes("generate");
     const period = parseInsightPeriod(lower);
     const insight = await getInsightForUser({
-      userId: params.ownerUserId,
+      userId: params.senderUserId,
       period,
       generate: shouldGenerate,
     });

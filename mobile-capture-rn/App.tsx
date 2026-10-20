@@ -22,9 +22,11 @@ import {
 import {
   clearCaptureLog,
   readCaptureLog,
+  readListenerApps,
   readListenerSeen,
   updateCaptureLogResult,
   type CaptureLogEntry,
+  type ListenerAppSeen,
   type ListenerSeen,
 } from "./src/lib/capture-log";
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./src/lib/config";
@@ -74,11 +76,17 @@ export default function App() {
   const [status, setStatus] = useState("Idle");
   const [captureLog, setCaptureLog] = useState<CaptureLogEntry[]>([]);
   const [listenerSeen, setListenerSeen] = useState<ListenerSeen | null>(null);
+  const [listenerApps, setListenerApps] = useState<ListenerAppSeen[]>([]);
 
   const refreshLog = useCallback(async () => {
-    const [entries, seen] = await Promise.all([readCaptureLog(), readListenerSeen()]);
+    const [entries, seen, apps] = await Promise.all([
+      readCaptureLog(),
+      readListenerSeen(),
+      readListenerApps(),
+    ]);
     setCaptureLog(entries);
     setListenerSeen(seen);
+    setListenerApps(apps);
   }, []);
 
   // Captures happen in the background, so reload the log whenever the app comes back to the front.
@@ -283,6 +291,16 @@ export default function App() {
             ? `Notification listener last fired: ${formatTime(listenerSeen.at)} (${listenerSeen.source ?? "unknown app"})`
             : "Notification listener has not fired yet"}
         </Text>
+        {listenerApps.length ? (
+          <View style={styles.logEntry}>
+            <Text style={styles.logMeta}>Apps seen by the notification listener</Text>
+            {listenerApps.map((app) => (
+              <Text key={app.source} style={styles.logPreview}>
+                {app.source} · {app.count}× · last {formatTime(app.at)}
+              </Text>
+            ))}
+          </View>
+        ) : null}
         <ActionButton title="Refresh Log" onPress={() => void refreshLog()} />
         <ActionButton title="Clear Log" onPress={() => void onClearLog()} />
 

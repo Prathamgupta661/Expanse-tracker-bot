@@ -68,13 +68,58 @@ export function readCaptureLog(): Promise<CaptureLogEntry[]> {
 }
 
 export function clearCaptureLog(): Promise<void> {
-  return withLogLock(() => AsyncStorage.removeItem(LOG_KEY));
+  return withLogLock(() => AsyncStorage.multiRemove([LOG_KEY, LISTENER_APPS_KEY]));
 }
 
-/** Records that the notification listener fired at all, for any app, to prove it is alive. */
-export async function recordListenerSeen(source: string | null): Promise<void> {
-  const seen: ListenerSeen = { at: new Date().toISOString(), source };
-  await AsyncStorage.setItem(LISTENER_SEEN_KEY, JSON.stringify(seen));
+export interface ListenerAppSeen {
+  source: string;
+  at: string;
+  count: number;
+}
+
+const LISTENER_APPS_KEY = "capture_listener_apps_v1";
+const MAX_LISTENER_APPS = 20;
+
+async function readListenerAppsMap(): Promise<Record<string, ListenerAppSeen>> {
+  const raw = await AsyncStorage.getItem(LISTENER_APPS_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw) as Record<string, ListenerAppSeen>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Records that the notification listener fired, for any app, to prove it is alive. Also keeps a
+ * per-app count, because the single "last fired" value is usually overwritten by chat apps.
+ */
+export function recordListenerSeen(source: string | null): Promise<void> {
+  return withLogLock(async () => {
+    const at = new Date().toISOString();
+    const seen: ListenerSeen = { at, source };
+    await AsyncStorage.setItem(LISTENER_SEEN_KEY, JSON.stringify(seen));
+
+    const key = source ?? "unknown app";
+    const apps = await readListenerAppsMap();
+    apps[key] = { source: key, at, count: (apps[key]?.count ?? 0) + 1 };
+    const kept = Object.values(apps)
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, MAX_LISTENER_APPS);
+    await AsyncStorage.setItem(
+      LISTENER_APPS_KEY,
+      JSON.stringify(Object.fromEntries(kept.map((item) => [item.source, item]))),
+    );
+  });
+}
+
+/** Most recently seen first. */
+export async function readListenerApps(): Promise<ListenerAppSeen[]> {
+  const apps = await readListenerAppsMap();
+  return Object.values(apps).sort((a, b) => b.at.localeCompare(a.at));
 }
 
 export async function readListenerSeen(): Promise<ListenerSeen | null> {

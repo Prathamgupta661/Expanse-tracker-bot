@@ -56,7 +56,7 @@ function shouldMatchFilter(value: string | null, csv: string): boolean {
   return filters.some((filter) => source.includes(filter));
 }
 
-const DEBIT_WORDS = ["upi", "paid", "debited", "sent", "payment"];
+const DEBIT_WORDS = ["upi", "paid", "debited", "sent", "payment", "withdrawn"];
 const NON_DEBIT_WORDS = ["pending", "failed", "refund", "credited", "request", "collect"];
 
 function mentionsPayment(message: string): boolean {

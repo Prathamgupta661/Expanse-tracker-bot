@@ -144,7 +144,7 @@ export interface ExpenseStats {
   totalAmount: number;
   count: number;
   categoryTotals: Array<{ category: string; total: number }>;
-  dailyTotals: Array<{ date: string; total: number }>;
+  dailyTotals: Array<{ date: string; total: number; byPerson: Record<string, number> }>;
 }
 
 export interface AuthLinkRequest {

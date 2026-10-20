@@ -9,10 +9,13 @@ import {
   REFERENCE_DEDUPE_WINDOW_MS,
 } from "@/lib/mobile-dedupe";
 import { verifyMobileIngestSignature } from "@/lib/mobile-ingest-auth";
+import { formatTelegramDisplayName } from "@/lib/expense-labels";
 import { getRequestId, logEvent } from "@/lib/logger";
 import {
   createIngestionEvent,
   getIngestionByUpdateId,
+  getProfileByUserId,
+  getTelegramLinkByTelegramId,
   insertExpenses,
   listExpensesByUser,
   updateIngestionEvent,
@@ -128,6 +131,54 @@ function normalizePayload(body: unknown): { ok: true; value: NormalizedMobilePay
   };
 }
 
+// The phone often sends one payment twice at the same moment (SMS broadcast plus the messaging
+// app's notification, or a re-posted notification). Running the duplicate check and the insert
+// one request at a time per user stops both copies from passing the check before either inserts.
+// This covers a single server process; it does not coordinate across multiple instances.
+const userIngestLocks = new Map<string, Promise<unknown>>();
+
+function withUserIngestLock<T>(userId: string, task: () => Promise<T>): Promise<T> {
+  const previous = userIngestLocks.get(userId) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.catch(() => undefined);
+  userIngestLocks.set(userId, tail);
+  void tail.then(() => {
+    if (userIngestLocks.get(userId) === tail) {
+      userIngestLocks.delete(userId);
+    }
+  });
+  return run;
+}
+
+/**
+ * Same membership rule as the Telegram webhook: a member's captures belong to the owner they
+ * linked to with /email, so they show on the owner's dashboard instead of an unviewable profile.
+ * Also returns who sent the capture, stored like Telegram's "added by" so the dashboard can show it.
+ */
+async function resolveCaptureOwner(senderUserId: string): Promise<{
+  ownerUserId: string;
+  addedByTelegramId: number | null;
+  addedByTelegramName: string | null;
+}> {
+  const sender = await getProfileByUserId(senderUserId);
+  if (!sender?.telegram_id) {
+    return { ownerUserId: senderUserId, addedByTelegramId: null, addedByTelegramName: null };
+  }
+  const link = await getTelegramLinkByTelegramId(sender.telegram_id);
+  return {
+    ownerUserId: link?.owner_user_id ?? senderUserId,
+    addedByTelegramId: sender.telegram_id,
+    addedByTelegramName: link
+      ? formatTelegramDisplayName({
+          id: sender.telegram_id,
+          username: link.telegram_username,
+          first_name: link.telegram_first_name,
+          last_name: link.telegram_last_name,
+        })
+      : null,
+  };
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
@@ -185,6 +236,8 @@ export async function POST(request: Request) {
 
     const payload = normalized.value;
     const sourceUpdateId = `mobile:${payload.userId}:${payload.eventId}`;
+    // Event ids stay keyed by the sending phone's profile; the expense itself goes to the owner.
+    const { ownerUserId, addedByTelegramId, addedByTelegramName } = await resolveCaptureOwner(payload.userId);
 
     const existing = await getIngestionByUpdateId(sourceUpdateId);
     if (existing?.status === "processed") {
@@ -216,7 +269,7 @@ export async function POST(request: Request) {
       const createdEvent =
         existing ||
         (await createIngestionEvent({
-          userId: payload.userId,
+          userId: ownerUserId,
           rawText: payload.message,
           sourceUpdateId,
         }));
@@ -280,36 +333,97 @@ export async function POST(request: Request) {
       ? getMobileDedupeWindow(payload.capturedAtIso, REFERENCE_DEDUPE_WINDOW_MS)
       : getMobileDedupeWindow(payload.capturedAtIso);
 
-    const candidates = await listExpensesByUser(payload.userId, {
-      from: window.from,
-      to: window.to,
-      limit: 200,
-      offset: 0,
-    });
+    const eventRowId = ingestionEventId;
+    return await withUserIngestLock(ownerUserId, async () => {
+      const candidates = await listExpensesByUser(ownerUserId, {
+        from: window.from,
+        to: window.to,
+        limit: 200,
+        offset: 0,
+      });
 
-    const duplicate = candidates.find((item) => {
-      if (
-        reference &&
-        getMobileMeta(item) &&
-        Number(item.amount) === parsed.value.amount &&
-        item.note.toUpperCase().includes(reference)
-      ) {
-        return true;
+      const duplicate = candidates.find((item) => {
+        if (
+          reference &&
+          getMobileMeta(item) &&
+          Number(item.amount) === parsed.value.amount &&
+          item.note.toUpperCase().includes(reference)
+        ) {
+          return true;
+        }
+        const meta = getMobileMeta(item);
+        return Boolean(meta && fingerprintVariants.includes(meta.fingerprint));
+      });
+
+      if (duplicate) {
+        await updateIngestionEvent({
+          id: eventRowId,
+          status: "processed",
+          parsedPayload: {
+            status: "duplicate",
+            reason: "Matched existing transaction fingerprint",
+            eventId: payload.eventId,
+            channel: payload.channel,
+            expenseId: duplicate.id,
+            fingerprint,
+          },
+        });
+
+        return NextResponse.json(
+          {
+            ok: true,
+            status: "duplicate",
+            reason: "Matched existing transaction fingerprint",
+            expenseId: duplicate.id,
+            requestId,
+          },
+          { status: 200 },
+        );
       }
-      const meta = getMobileMeta(item);
-      return Boolean(meta && fingerprintVariants.includes(meta.fingerprint));
-    });
 
-    if (duplicate) {
+      const mobileMeta: MobileExpenseMeta = {
+        event_id: payload.eventId,
+        channel: payload.channel,
+        app_or_sender: payload.appOrSender,
+        payload_hash: payloadHash,
+        fingerprint,
+        captured_at: payload.capturedAtIso,
+        duplicate_of_expense_id: null,
+        location: payload.location,
+      };
+
+      const expenseRows: NewExpense[] = [
+        {
+          user_id: ownerUserId,
+          amount: parsed.value.amount,
+          currency: "INR",
+          category: parsed.value.category,
+          merchant: parsed.value.merchant,
+          note: parsed.value.note,
+          expense_date: payload.capturedAtIso,
+          source: "dashboard",
+          category_source: "rule",
+          confidence: 1,
+          mobile_meta: mobileMeta,
+          added_by_telegram_id: addedByTelegramId,
+          added_by_telegram_name: addedByTelegramName,
+        },
+      ];
+
+      const inserted = await insertExpenses(expenseRows);
+      const createdExpense = inserted[0];
+      if (!createdExpense) {
+        throw new Error("Expense insert did not return a row");
+      }
+
       await updateIngestionEvent({
-        id: ingestionEventId,
+        id: eventRowId,
         status: "processed",
         parsedPayload: {
-          status: "duplicate",
-          reason: "Matched existing transaction fingerprint",
+          status: "processed",
           eventId: payload.eventId,
           channel: payload.channel,
-          expenseId: duplicate.id,
+          expenseId: createdExpense.id,
           fingerprint,
         },
       });
@@ -317,69 +431,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           ok: true,
-          status: "duplicate",
-          reason: "Matched existing transaction fingerprint",
-          expenseId: duplicate.id,
+          status: "processed",
+          expenseId: createdExpense.id,
           requestId,
         },
-        { status: 200 },
+        { status: 201 },
       );
-    }
-
-    const mobileMeta: MobileExpenseMeta = {
-      event_id: payload.eventId,
-      channel: payload.channel,
-      app_or_sender: payload.appOrSender,
-      payload_hash: payloadHash,
-      fingerprint,
-      captured_at: payload.capturedAtIso,
-      duplicate_of_expense_id: null,
-      location: payload.location,
-    };
-
-    const expenseRows: NewExpense[] = [
-      {
-        user_id: payload.userId,
-        amount: parsed.value.amount,
-        currency: "INR",
-        category: parsed.value.category,
-        merchant: parsed.value.merchant,
-        note: parsed.value.note,
-        expense_date: payload.capturedAtIso,
-        source: "dashboard",
-        category_source: "rule",
-        confidence: 1,
-        mobile_meta: mobileMeta,
-      },
-    ];
-
-    const inserted = await insertExpenses(expenseRows);
-    const createdExpense = inserted[0];
-    if (!createdExpense) {
-      throw new Error("Expense insert did not return a row");
-    }
-
-    await updateIngestionEvent({
-      id: ingestionEventId,
-      status: "processed",
-      parsedPayload: {
-        status: "processed",
-        eventId: payload.eventId,
-        channel: payload.channel,
-        expenseId: createdExpense.id,
-        fingerprint,
-      },
     });
-
-    return NextResponse.json(
-      {
-        ok: true,
-        status: "processed",
-        expenseId: createdExpense.id,
-        requestId,
-      },
-      { status: 201 },
-    );
   } catch (error) {
     if (ingestionEventId) {
       try {

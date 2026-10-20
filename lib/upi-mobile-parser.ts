@@ -19,6 +19,7 @@ const INCLUDE_PATTERNS: RegExp[] = [
   /\bpayment of\b/i,
   /\bpayment successful\b/i,
   /\bupi txn\b/i,
+  /\bwithdrawn\b/i,
 ];
 
 // Bank debit SMS often name the payee as "debited A/c... and credited to <payee>", so these
@@ -110,7 +111,10 @@ export function parseUpiMobileMessage(params: {
     return { status: "ignored", reason: "Empty message body" };
   }
 
-  if (!/\bupi\b/i.test(note)) {
+  const isUpi = /\bupi\b/i.test(note);
+  // Cash withdrawals ("Rs.5000 withdrawn from a/c xx1234") are real debits but never mention UPI.
+  const isAccountWithdrawal = /\bwithdrawn\b/i.test(note) && /\b(?:a\/c|acct|account)\b/i.test(note);
+  if (!isUpi && !isAccountWithdrawal) {
     return { status: "ignored", reason: "Message does not look like a UPI transaction" };
   }
 
@@ -131,7 +135,7 @@ export function parseUpiMobileMessage(params: {
     return { status: "ignored", reason: "Amount could not be extracted" };
   }
 
-  const merchant = extractMerchant(note, params.appOrSender);
+  const merchant = isUpi ? extractMerchant(note, params.appOrSender) : "Cash Withdrawal";
   const reference = extractReference(note);
   const category = inferCategory(`${merchant} ${note}`);
 

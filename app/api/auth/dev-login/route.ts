@@ -12,6 +12,24 @@ function isValidEmail(input: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
 }
 
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function hostnameOf(hostHeader: string): string {
+  // Strip the port, keeping bracketed IPv6 hosts intact.
+  return hostHeader.trim().toLowerCase().replace(/:\d+$/, "");
+}
+
+/**
+ * Dev login has no password, so it must never be reachable from outside this machine. Tunnels
+ * such as ngrok forward their public hostname in the Host header, which is rejected here.
+ */
+function isLocalRequest(request: Request): boolean {
+  const hosts = [request.headers.get("host"), request.headers.get("x-forwarded-host")].filter(
+    (value): value is string => Boolean(value),
+  );
+  return hosts.length > 0 && hosts.every((host) => LOCAL_HOSTNAMES.has(hostnameOf(host)));
+}
+
 function resolveSafeNext(nextPath: string | undefined): string {
   if (!nextPath || !nextPath.startsWith("/")) {
     return "/";
@@ -25,6 +43,20 @@ export async function POST(request: Request) {
     if (!config.isDevAuthEnabled()) {
       return NextResponse.json(
         { error: "Dev auth is disabled", requestId },
+        { status: 403 },
+      );
+    }
+
+    if (!isLocalRequest(request)) {
+      logEvent({
+        requestId,
+        route: "/api/auth/dev-login",
+        phase: "rejected_non_local",
+        severity: "warn",
+        message: "Rejected dev login from a non-local host",
+      });
+      return NextResponse.json(
+        { error: "Dev login is only available on localhost", requestId },
         { status: 403 },
       );
     }

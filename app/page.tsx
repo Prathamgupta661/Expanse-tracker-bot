@@ -17,6 +17,8 @@ import {
   YAxis,
 } from "recharts";
 
+import { getAddedByLabel } from "@/lib/expense-labels";
+
 type InsightPeriod = "daily" | "weekly" | "monthly";
 
 interface ExpenseRow {
@@ -40,7 +42,7 @@ interface DashboardStats {
   totalAmount: number;
   count: number;
   categoryTotals: Array<{ category: string; total: number }>;
-  dailyTotals: Array<{ date: string; total: number }>;
+  dailyTotals: Array<{ date: string; total: number; byPerson?: Record<string, number> }>;
 }
 
 interface InsightData {
@@ -76,18 +78,6 @@ function formatChartAmount(value: unknown): string {
   return formatAmount(numeric);
 }
 
-function getAddedByLabel(expense: ExpenseRow): string {
-  if (expense.mobile_meta?.channel) {
-    return "Auto Capture";
-  }
-  if (expense.added_by_telegram_name) {
-    return expense.added_by_telegram_name;
-  }
-  if (expense.added_by_telegram_id) {
-    return `Telegram ${expense.added_by_telegram_id}`;
-  }
-  return "Self";
-}
 
 function getSourceLabel(expense: ExpenseRow): string {
   if (expense.mobile_meta?.channel === "notification") {
@@ -160,6 +150,14 @@ export default function Home() {
     return items;
   }, [stats]);
 
+  const trendPeople = useMemo(() => {
+    const people = new Set<string>();
+    for (const item of stats?.dailyTotals || []) {
+      Object.keys(item.byPerson || {}).forEach((person) => people.add(person));
+    }
+    return [...people].sort();
+  }, [stats]);
+
   const trendData = useMemo(() => {
     if (!stats?.dailyTotals?.length) {
       return [];
@@ -167,12 +165,16 @@ export default function Home() {
 
     return stats.dailyTotals.map((item) => ({
       ...item,
+      // One key per person (0 on days they spent nothing), read by the per-person chart lines.
+      ...Object.fromEntries(
+        trendPeople.map((person) => [`person:${person}`, item.byPerson?.[person] ?? 0]),
+      ),
       label: new Date(item.date).toLocaleDateString("en-IN", {
         day: "2-digit",
         month: "short",
       }),
     }));
-  }, [stats]);
+  }, [stats, trendPeople]);
 
   const fetchDashboardData = async (
     selectedPeriod: InsightPeriod,
@@ -620,11 +622,27 @@ export default function Home() {
                   <Line
                     type="monotone"
                     dataKey="total"
+                    name="Total"
                     stroke="#38bdf8"
                     strokeWidth={3}
                     dot={{ r: 3, fill: "#38bdf8" }}
                     activeDot={{ r: 5 }}
                   />
+                  {trendPeople.length > 1
+                    ? trendPeople.map((person, index) => (
+                        <Line
+                          key={person}
+                          type="monotone"
+                          dataKey={`person:${person}`}
+                          name={person}
+                          stroke={CHART_COLORS[(index + 1) % CHART_COLORS.length]}
+                          strokeWidth={2}
+                          strokeDasharray="4 3"
+                          dot={{ r: 2 }}
+                        />
+                      ))
+                    : null}
+                  {trendPeople.length > 1 ? <Legend /> : null}
                 </LineChart>
               </ResponsiveContainer>
             ) : (
