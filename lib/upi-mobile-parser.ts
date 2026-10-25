@@ -20,6 +20,8 @@ const INCLUDE_PATTERNS: RegExp[] = [
   /\bpayment successful\b/i,
   /\bupi txn\b/i,
   /\bwithdrawn\b/i,
+  // Credit-card UPI payments: "Rs. 100 spent on your credit card xx2056 at <merchant> on <date>".
+  /\bspent\b/i,
 ];
 
 // Bank debit SMS often name the payee as "debited A/c... and credited to <payee>", so these
@@ -37,6 +39,7 @@ const EXCLUDE_PATTERNS: RegExp[] = [
 ];
 
 const MERCHANT_PATTERNS: RegExp[] = [
+  /\bspent\b.*?\bat\s+([a-z0-9&@._\-\s]{2,80}?)(?=\s+on\s+\d)/i,
   /(?:paid|sent|payment(?:\s+of)?)\s+(?:to|at)\s+([a-z0-9&@._\-\s]{2,80}?)(?=\s+(?:via|through)\s+upi|\s+upi\b|\s+(?:ref|utr|txn)\b|[.,]|$)/i,
   /(?:to|at)\s+([a-z0-9&@._\-\s]{2,80}?)(?=\s+(?:via|through)\s+upi|\s+upi\b|\s+(?:ref|utr|txn)\b|[.,]|$)/i,
 ];
