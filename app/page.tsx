@@ -127,6 +127,8 @@ export default function Home() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [insight, setInsight] = useState<InsightData | null>(null);
+  const [trendPerson, setTrendPerson] = useState("all");
+  const [trendDay, setTrendDay] = useState("all");
 
   const pieData = useMemo(() => {
     if (!stats?.categoryTotals?.length) {
@@ -175,6 +177,25 @@ export default function Home() {
       }),
     }));
   }, [stats, trendPeople]);
+
+  // Fall back to "all" when a reload drops the selected person or day from the data.
+  const activeTrendPerson = trendPeople.includes(trendPerson) ? trendPerson : "all";
+  const activeTrendDay = trendData.some((item) => item.date === trendDay) ? trendDay : "all";
+
+  const visibleTrendData = useMemo(
+    () => (activeTrendDay === "all" ? trendData : trendData.filter((item) => item.date === activeTrendDay)),
+    [trendData, activeTrendDay],
+  );
+
+  const trendDayBreakdown = useMemo(() => {
+    const day = trendData.find((item) => item.date === activeTrendDay);
+    if (!day) {
+      return [];
+    }
+    return Object.entries(day.byPerson || {})
+      .filter(([person]) => activeTrendPerson === "all" || person === activeTrendPerson)
+      .sort((a, b) => b[1] - a[1]);
+  }, [trendData, activeTrendDay, activeTrendPerson]);
 
   const fetchDashboardData = async (
     selectedPeriod: InsightPeriod,
@@ -603,11 +624,55 @@ export default function Home() {
         </section>
 
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-          <h2 className="text-lg font-semibold">Daily Spend Trend</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Daily Spend Trend</h2>
+            {trendPeople.length > 1 ? (
+              <div className="flex flex-wrap gap-2">
+                <select
+                  aria-label="Filter by person"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm"
+                  value={activeTrendPerson}
+                  onChange={(event) => setTrendPerson(event.target.value)}
+                >
+                  <option value="all">All people</option>
+                  {trendPeople.map((person) => (
+                    <option key={person} value={person}>
+                      {person}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Filter by day"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm"
+                  value={activeTrendDay}
+                  onChange={(event) => setTrendDay(event.target.value)}
+                >
+                  <option value="all">All days</option>
+                  {trendData.map((item) => (
+                    <option key={item.date} value={item.date}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+          </div>
+          {trendDayBreakdown.length ? (
+            <div className="mt-3 flex flex-wrap gap-2 text-sm">
+              {trendDayBreakdown.map(([person, amount]) => (
+                <span
+                  key={person}
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-slate-200"
+                >
+                  {person}: <span className="font-medium">{formatAmount(amount)}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-4 h-72">
-            {trendData.length ? (
+            {visibleTrendData.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                <LineChart data={visibleTrendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
                   <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
                   <XAxis dataKey="label" stroke="#94a3b8" tick={{ fontSize: 12 }} />
                   <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} width={72} />
@@ -619,17 +684,20 @@ export default function Home() {
                       borderRadius: "0.75rem",
                     }}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="total"
-                    name="Total"
-                    stroke="#38bdf8"
-                    strokeWidth={3}
-                    dot={{ r: 3, fill: "#38bdf8" }}
-                    activeDot={{ r: 5 }}
-                  />
+                  {activeTrendPerson === "all" ? (
+                    <Line
+                      type="monotone"
+                      dataKey="total"
+                      name="Total"
+                      stroke="#38bdf8"
+                      strokeWidth={3}
+                      dot={{ r: 3, fill: "#38bdf8" }}
+                      activeDot={{ r: 5 }}
+                    />
+                  ) : null}
                   {trendPeople.length > 1
-                    ? trendPeople.map((person, index) => (
+                    ? trendPeople.map((person, index) =>
+                        activeTrendPerson !== "all" && person !== activeTrendPerson ? null : (
                         <Line
                           key={person}
                           type="monotone"
@@ -640,7 +708,8 @@ export default function Home() {
                           strokeDasharray="4 3"
                           dot={{ r: 2 }}
                         />
-                      ))
+                        ),
+                      )
                     : null}
                   {trendPeople.length > 1 ? <Legend /> : null}
                 </LineChart>
